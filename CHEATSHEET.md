@@ -21,7 +21,7 @@ Every command, organized by what you're trying to do. Copy-paste ready.
 ```bash
 cd /opt/fleet-fuel/app
 sudo ./scripts/deploy.sh        # install once, then this ships EVERY update
-./scripts/status.sh             # is everything OK?
+sudo ./scripts/status.sh        # is everything OK? (ops scripts need sudo)
 sudo ./scripts/backup.sh        # take a backup right now
 ```
 

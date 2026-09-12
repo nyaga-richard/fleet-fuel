@@ -7,6 +7,10 @@ set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 resolve_env_file || { echo "Fleet Fuel System — .env not found"; exit 1; }
+if [ ! -r "$ENV_FILE" ]; then
+  echo "status: $ENV_FILE is not readable by user '$(id -un)' — re-run with sudo: sudo ./scripts/status.sh"
+  exit 2
+fi
 
 API_PORT_H="$(env_value API_PORT 4000)"
 WEB_PORT_H="$(env_value WEB_PORT 3000)"

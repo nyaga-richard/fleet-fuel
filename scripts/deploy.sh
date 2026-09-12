@@ -244,8 +244,12 @@ printf '{"commit":"%s","short":"%s","branch":"%s","version":"%s","deployed_at":"
   "$NEW_COMMIT" "$NEW_SHORT" "${GIT_BRANCH:-?}" "${APP_VERSION:-?}" "$(date -u +%FT%TZ)" "${BUILD_DATE:-?}" "$PREV_COMMIT" "${PREV_BACKUP_FILE:-none}" \
   > "$DEPLOY_DIR/last-deploy.json"
 
-# Best-effort final health summary (does not fail deploy).
-bash "$SCRIPTS_DIR/healthcheck.sh" >/dev/null 2>&1 && HEALTH="ONLINE" || HEALTH="DEGRADED (run: bash scripts/healthcheck.sh)"
+# Best-effort final health summary — SHOW the checks in deploy output so a
+# DEGRADED verdict is never a mystery.
+HEALTH="ONLINE"
+if ! bash "$SCRIPTS_DIR/healthcheck.sh"; then
+  HEALTH="DEGRADED — see failed checks above (or run: sudo bash scripts/healthcheck.sh)"
+fi
 
 WEB_DOMAIN="$(env_value WEB_DOMAIN fuel.example.com)"
 API_DOMAIN="$(env_value API_DOMAIN api.fuel.example.com)"
