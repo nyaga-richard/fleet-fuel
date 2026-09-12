@@ -53,14 +53,24 @@ function Requests() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // GET /api/requests/:id returns { request, authorizations } — unwrap it.
+  function applyDetail(res, fallback = null) {
+    if (!res || !(res.request || res.id)) { setDetail(fallback); return; }
+    setDetail({ ...(res.request || res), authorizations: res.authorizations || [] });
+  }
+
   async function openDetailsById(id) {
-    try { setDetail(await api(`/api/requests/${id}`)); }
+    try { applyDetail(await api(`/api/requests/${id}`), (rows || []).find((r) => r.id === id) || null); }
     catch { setDetail((rows || []).find((r) => r.id === id) || null); }
   }
 
   async function openDetails(row) {
     setDetail(row);
-    try { setDetail(await api(`/api/requests/${row.id}`)); } catch { /* row data is enough */ }
+    try { applyDetail(await api(`/api/requests/${row.id}`), row); } catch { /* row data is enough */ }
+  }
+
+  async function refreshDetail(id) {
+    try { applyDetail(await api(`/api/requests/${id}`)); } catch { setDetail(null); }
   }
 
   async function createRequest(e) {
@@ -78,10 +88,10 @@ function Requests() {
   async function decide(id, decision) {
     setBusy(true); setError('');
     try {
-      await api(`/api/requests/${id}/${decision}`, { method: 'POST', body: {} });
+      const res = await api(`/api/requests/${id}/${decision}`, { method: 'POST', body: {} });
       setNotice(decision === 'approve' ? 'Request authorized.' : 'Request rejected.');
       setConfirm(null);
-      setDetail(null);
+      setDetail(res.request || null); // keep the drawer open with the new status
       load();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
@@ -89,9 +99,10 @@ function Requests() {
   async function cancel(id) {
     setBusy(true); setError('');
     try {
-      await api(`/api/requests/${id}/cancel`, { method: 'POST', body: {} });
+      const res = await api(`/api/requests/${id}/cancel`, { method: 'POST', body: {} });
       setNotice('Request cancelled.');
-      setConfirm(null); setDetail(null);
+      setConfirm(null);
+      setDetail(res.request || null);
       load();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
@@ -220,7 +231,7 @@ function Requests() {
           </div>
         )}
       >
-        {detail ? <RequestDetail d={detail} /> : <Skeleton lines={5} />}
+        {detail ? <><RequestDetail d={detail} /><AuthorizationTrail items={detail.authorizations} /></> : <Skeleton lines={5} />}
       </Drawer>
 
       <ConfirmDialog
@@ -253,5 +264,20 @@ function RequestDetail({ d }) {
       <span className="k">Authorized by</span><span className="v">{d.authorized_by_name || '—'}</span>
       <span className="k">Authorized at</span><span className="v">{d.authorized_at ? fmtDateTime(d.authorized_at) : '—'}</span>
     </div>
+  );
+}
+
+function AuthorizationTrail({ items }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <>
+      <h3 style={{ margin: '18px 0 8px', fontSize: 13.5 }}>Authorization history</h3>
+      {items.map((a, i) => (
+        <div key={a.id ?? i} className="muted" style={{ fontSize: 12.5, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+          {a.decided_by_name || '—'} · {String(a.action || a.decision || '').toUpperCase() || 'decided'} · {fmtDateTime(a.decided_at)}
+          {a.comments ? ` — "${a.comments}"` : ''}
+        </div>
+      ))}
+    </>
   );
 }

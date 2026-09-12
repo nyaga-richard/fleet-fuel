@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { TouchableOpacity, View, Text, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { TouchableOpacity } from 'react-native-gesture-handler';
 import { Screen, Card, StatusBadge, Btn, KV, EmptyState } from '../../src/components';
 import { cachedRequests, cachedVehicles, cachedFuelTypes } from '../../src/db';
 import { useAuth } from '../../src/auth';

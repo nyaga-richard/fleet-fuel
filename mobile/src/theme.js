@@ -18,7 +18,7 @@ export const C = {
 };
 
 export const S = {
-  xs: 4, sm: 8, md: 12, lg: 16, xl: 24,
+  xs: 4, sm: 8, md: 12, lg: 18, xl: 24,
 };
 
 export const R = { sm: 8, md: 10, lg: 14, pill: 20 };
@@ -40,4 +40,4 @@ export const STATUS_COLOR = {
 };
 
 // Minimum touch target (spec §13): keep interactive controls ≥ 44pt.
-export const TAP = 46;
+export const TAP = 50;
