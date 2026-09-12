@@ -8,6 +8,12 @@ import { config } from '../config.js';
 
 const router = Router();
 
+// Every system endpoint requires a signed-in session (matches all other
+// routers). Without this, requireRole below saw req.user === undefined and
+// returned 401 for EVERYONE — which the web client treats as "session
+// expired", logging users out the moment they opened the System page.
+router.use(requireAuth);
+
 function buildInfo() {
   return {
     name: 'Fleet Fuel Management System',

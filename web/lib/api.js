@@ -10,7 +10,7 @@ export function getToken() {
   return localStorage.getItem('ff_token');
 }
 
-export async function api(path, { method = 'GET', body } = {}) {
+export async function api(path, { method = 'GET', body, optional = false } = {}) {
   const token = getToken();
   let res;
   try {

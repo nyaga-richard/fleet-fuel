@@ -21,7 +21,7 @@ function System() {
         const [v, h, d] = await Promise.all([
           api('/api/system/version'),
           api('/api/health'),
-          api('/api/system/deployments').catch(() => ({ deployments: [] })),
+          api('/api/system/deployments', { optional: true }).catch(() => ({ deployments: [] })),
         ]);
         if (alive) setState({ loading: false, error: null, needsAuth: false, data: { v, h, deployments: d.deployments || [] } });
       } catch (e) {
