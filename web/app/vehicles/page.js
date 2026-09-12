@@ -50,9 +50,11 @@ function Vehicles() {
   }
 
   async function toggleActive(v) {
+    if (v.active && !window.confirm(`Delete vehicle "${v.plate}"?\n\nIt will be deactivated and hidden from new records. All fuel history is preserved; you can restore it any time.`)) return;
     setError('');
     try {
       await api(`/api/vehicles/${v.id}`, { method: 'PATCH', body: { active: !v.active } });
+      setNotice(v.active ? `Vehicle ${v.plate} deleted (deactivated).` : `Vehicle ${v.plate} restored.`);
       load();
     } catch (e) { setError(e.message); }
   }
@@ -98,13 +100,13 @@ function Vehicles() {
             {
               key: 'active', label: 'Status', render: (r) => r.active
                 ? <span className="pill" style={{ color: '#22c55e', borderColor: '#22c55e' }}>Active</span>
-                : <span className="pill" style={{ color: '#9ca3af', borderColor: '#9ca3af' }}>Inactive</span>,
+                : <span className="pill" style={{ color: '#9ca3af', borderColor: '#9ca3af' }}>Deleted</span>,
             },
             {
               key: 'actions', label: '', render: (r) => canManage ? (
                 <span className="row-actions">
                   <button className="btn secondary sm" onClick={() => openEdit(r)}>Edit</button>
-                  <button className="btn secondary sm" onClick={() => toggleActive(r)}>{r.active ? 'Deactivate' : 'Activate'}</button>
+                  <button className="btn danger sm" onClick={() => toggleActive(r)}>{r.active ? 'Delete' : 'Restore'}</button>
                 </span>
               ) : null,
             },

@@ -8,11 +8,24 @@
 // the server exactly once (idempotent via op_id / client_uuid).
 //
 // Local data survives: temporary Internet loss, app restart, device restart.
+//
+// Hermes/RN note: there is NO `crypto` global in React Native — never
+// reference it. uuid4() below generates valid UUID v4 format (required by
+// the server's uuid columns) with zero dependencies.
 // ============================================================================
 import * as SQLite from 'expo-sqlite';
 import Constants from 'expo-constants';
 
 export const db = SQLite.openDatabaseSync('fleetfuel.db');
+
+// ── IDs ──────────────────────────────────────────────────────────────────────
+function uuid4() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 export async function initDb() {
   await db.execAsync(`
@@ -73,10 +86,8 @@ export async function kvSet(key, value) {
 export async function deviceId() {
   let id = await kvGet('device_id');
   if (!id) {
-    const rnd = typeof crypto?.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `dev-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    id = `${Constants.deviceName || 'device'}-${rnd.slice(0, 8)}`;
+    const label = Constants?.deviceName || 'device';
+    id = `${label}-${uuid4().slice(0, 8)}`;
     await kvSet('device_id', id);
   }
   return id;
@@ -84,7 +95,7 @@ export async function deviceId() {
 
 // ── Outbox (pending ops) ─────────────────────────────────────────────────────
 export async function enqueue(type, payload) {
-  const opId = `${typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`;
+  const opId = uuid4();
   await db.runAsync(
     'INSERT INTO outbox (op_id, type, payload, created_at) VALUES (?, ?, ?, ?)',
     [opId, type, JSON.stringify(payload), new Date().toISOString()],
@@ -94,7 +105,7 @@ export async function enqueue(type, payload) {
 
 export async function pendingOps(limit = 100) {
   return db.getAllAsync(
-    `SELECT * FROM outbox WHERE retry_count < 8 ORDER BY created_at ASC LIMIT ?`, [limit],
+    'SELECT * FROM outbox WHERE retry_count < 8 ORDER BY created_at ASC LIMIT ?', [limit],
   );
 }
 
@@ -134,8 +145,7 @@ export async function cachedTanks() {
 }
 export async function cachedPumps() {
   return db.getAllAsync(
-    `SELECT p.*, t.name AS tank_name FROM pumps p
-     LEFT JOIN tanks t ON t.id = p.tank_id WHERE p.active = 1 ORDER BY p.name`);
+    'SELECT p.*, t.name AS tank_name FROM pumps p LEFT JOIN tanks t ON t.id = p.tank_id WHERE p.active = 1 ORDER BY p.name');
 }
 export async function cachedRequests(limit = 100) {
   return db.getAllAsync(

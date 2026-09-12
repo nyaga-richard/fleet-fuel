@@ -270,6 +270,8 @@ npm run dev                                      # next dev, hot reload
 
 ## 1️⃣3️⃣ Mobile app
 
+> Full build & distribution walkthrough: [MOBILE.md](MOBILE.md)
+
 ```bash
 cd mobile
 cp .env.example .env

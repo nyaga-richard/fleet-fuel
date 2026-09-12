@@ -130,7 +130,7 @@ function Requests() {
                       <button className="btn danger sm" onClick={() => decide(r.id, 'reject')}>Reject</button>
                     </>
                   )}
-                  {r.status === 'pending' && (r.requested_by === user.sub || user.role === 'admin') && (
+                  {r.status === 'pending' && (r.requested_by === user.id || user.role === 'admin') && (
                     <button className="btn secondary sm" onClick={() => cancel(r.id)}>Cancel</button>
                   )}
                 </span>
