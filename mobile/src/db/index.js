@@ -83,6 +83,10 @@ export async function kvSet(key, value) {
   await db.runAsync('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, String(value)]);
 }
 
+export async function kvRemove(key) {
+  await db.runAsync('DELETE FROM kv WHERE key = ?', [key]);
+}
+
 export async function deviceId() {
   let id = await kvGet('device_id');
   if (!id) {

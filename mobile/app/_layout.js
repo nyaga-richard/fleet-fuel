@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../src/auth';
 import { startAutoSync } from '../src/sync';
 
@@ -23,9 +24,11 @@ function Bootstrap() {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <StatusBar style="light" />
-      <Bootstrap />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <StatusBar style="light" />
+        <Bootstrap />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }

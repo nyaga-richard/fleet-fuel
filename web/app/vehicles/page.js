@@ -1,26 +1,33 @@
 'use client';
+// Vehicles — server-side search (?q=), add / edit / delete (deactivate) /
+// restore. Deletion is a soft delete: fuel history is never touched.
 import { useCallback, useEffect, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, Table, Notice, useForm, Field } from '@/components/ui';
+import { Card, PageHeader, SearchInput, Notice, useForm, Field, DataTable, StatusPill, Skeleton, ConfirmDialog, EmptyState } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { fmtDate } from '@/lib/format';
+import { fmtDate, fmtQty } from '@/lib/format';
 
 export default function VehiclesPage() {
   return <Shell><Vehicles /></Shell>;
 }
 
+const EMPTY_FORM = { plate: '', make: '', model: '', vehicle_type: '', driver_name: '', tank_capacity: '', notes: '' };
+
 function Vehicles() {
   const { user } = useAuth();
-  const canManage = user.role === 'admin' || user.role === 'manager';
-  const [rows, setRows] = useState([]);
+  const canManage = user?.role === 'admin' || user?.role === 'manager';
+  const [rows, setRows] = useState(null);
   const [q, setQ] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [editing, setEditing] = useState(null); // vehicle being edited or 'new'
-  const { form, bind, setForm } = useForm({ plate: '', make: '', model: '', vehicle_type: '', driver_name: '', tank_capacity: '', notes: '' });
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null); // vehicle id or 'new'
+  const [confirmDel, setConfirmDel] = useState(null);
+  const { form, bind, setForm } = useForm(EMPTY_FORM);
 
   const load = useCallback(async () => {
+    setError('');
     try {
       const r = await api(`/api/vehicles?q=${encodeURIComponent(q)}`);
       setRows(r.vehicles);
@@ -29,12 +36,12 @@ function Vehicles() {
 
   useEffect(() => { load(); }, [load]);
 
-  function openNew() { setEditing('new'); setForm({ plate: '', make: '', model: '', vehicle_type: '', driver_name: '', tank_capacity: '', notes: '' }); }
+  function openNew() { setEditing('new'); setForm(EMPTY_FORM); }
   function openEdit(v) { setEditing(v.id); setForm({ ...v, tank_capacity: v.tank_capacity ?? '' }); }
 
   async function save(e) {
     e.preventDefault();
-    setError('');
+    setBusy(true); setError('');
     try {
       const body = { ...form, tank_capacity: form.tank_capacity === '' ? undefined : Number(form.tank_capacity) };
       if (editing === 'new') {
@@ -46,75 +53,112 @@ function Vehicles() {
       }
       setEditing(null);
       load();
-    } catch (e) { setError(e.message); }
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
   async function toggleActive(v) {
-    if (v.active && !window.confirm(`Delete vehicle "${v.plate}"?\n\nIt will be deactivated and hidden from new records. All fuel history is preserved; you can restore it any time.`)) return;
-    setError('');
+    setBusy(true); setError('');
     try {
       await api(`/api/vehicles/${v.id}`, { method: 'PATCH', body: { active: !v.active } });
       setNotice(v.active ? `Vehicle ${v.plate} deleted (deactivated).` : `Vehicle ${v.plate} restored.`);
+      setConfirmDel(null);
       load();
-    } catch (e) { setError(e.message); }
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
   return (
     <>
+      <PageHeader
+        title="Vehicles"
+        subtitle="Fleet register — search by plate, make, model or driver"
+        actions={canManage && <button className="btn" onClick={openNew}>+ Add vehicle</button>}
+      />
+
       {error && <Notice kind="error" onDone={() => setError('')}>{error}</Notice>}
       {notice && <Notice kind="success" onDone={() => setNotice('')}>{notice}</Notice>}
 
-      <Card
-        title="Vehicles"
-        actions={(
-          <div style={{ display: 'flex', gap: 10 }}>
-            <input placeholder="Search plate / driver…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
-            {canManage && <button className="btn" onClick={openNew}>+ Add vehicle</button>}
-          </div>
-        )}
-      >
-        {editing && (
-          <form onSubmit={save} className="grid c3" style={{ marginBottom: 16 }}>
-            <Field label="Plate *"><input {...bind('plate')} required placeholder="KDA 001X" style={{ textTransform: 'uppercase' }} /></Field>
-            <Field label="Make"><input {...bind('make')} /></Field>
-            <Field label="Model"><input {...bind('model')} /></Field>
-            <Field label="Type"><input {...bind('vehicle_type')} placeholder="truck / car / forklift" /></Field>
-            <Field label="Driver"><input {...bind('driver_name')} /></Field>
-            <Field label="Tank capacity (L)"><input type="number" step="0.1" min="0" {...bind('tank_capacity')} /></Field>
+      {editing && (
+        <Card title={editing === 'new' ? 'Add vehicle' : 'Edit vehicle'}>
+          <form onSubmit={save} className="grid c3">
+            <Field label="Registration plate *"><input {...bind('plate')} required placeholder="e.g. KDA 123A" style={{ textTransform: 'uppercase' }} /></Field>
+            <Field label="Make"><input {...bind('make')} placeholder="Toyota" /></Field>
+            <Field label="Model"><input {...bind('model')} placeholder="Hilux" /></Field>
+            <Field label="Vehicle type"><input {...bind('vehicle_type')} placeholder="pickup / truck / saloon" /></Field>
+            <Field label="Default driver"><input {...bind('driver_name')} /></Field>
+            <Field label="Tank capacity (L)"><input type="number" inputMode="decimal" step="0.1" min="0" {...bind('tank_capacity')} /></Field>
             <Field label="Notes"><input {...bind('notes')} /></Field>
             <div style={{ gridColumn: '1 / -1' }}>
-              <button className="btn">{editing === 'new' ? 'Add vehicle' : 'Save changes'}</button>
+              <button className="btn" disabled={busy}>{busy ? 'Saving…' : editing === 'new' ? 'Add vehicle' : 'Save changes'}</button>
               <button type="button" className="btn secondary" onClick={() => setEditing(null)}>Cancel</button>
             </div>
           </form>
-        )}
+        </Card>
+      )}
 
-        <Table
-          columns={[
-            { key: 'plate', label: 'Plate' },
-            { key: 'make', label: 'Make / model', render: (r) => [r.make, r.model].filter(Boolean).join(' ') || '—' },
-            { key: 'vehicle_type', label: 'Type', render: (r) => r.vehicle_type || '—' },
-            { key: 'driver_name', label: 'Driver', render: (r) => r.driver_name || '—' },
-            { key: 'tank_capacity', label: 'Tank (L)', num: true, render: (r) => (r.tank_capacity ? Number(r.tank_capacity).toLocaleString() : '—') },
-            { key: 'created_at', label: 'Added', render: (r) => fmtDate(r.created_at) },
-            {
-              key: 'active', label: 'Status', render: (r) => r.active
-                ? <span className="pill" style={{ color: '#22c55e', borderColor: '#22c55e' }}>Active</span>
-                : <span className="pill" style={{ color: '#9ca3af', borderColor: '#9ca3af' }}>Deleted</span>,
-            },
-            {
-              key: 'actions', label: '', render: (r) => canManage ? (
+      <Card title="Fleet" actions={<SearchInput value={q} onChange={setQ} placeholder="Search plate, make, driver…" width={280} />}>
+        {!rows ? <Skeleton lines={6} /> : (
+          <DataTable
+            columns={[
+              { key: 'plate', label: 'Plate', render: (r) => <b>{r.plate}</b> },
+              { key: 'make', label: 'Make / model', render: (r) => [r.make, r.model].filter(Boolean).join(' ') || '—' },
+              { key: 'vehicle_type', label: 'Type', render: (r) => r.vehicle_type || '—' },
+              { key: 'driver_name', label: 'Driver', render: (r) => r.driver_name || '—' },
+              { key: 'tank_capacity', label: 'Tank', num: true, render: (r) => (r.tank_capacity ? fmtQty(r.tank_capacity) : '—') },
+              { key: 'created_at', label: 'Added', render: (r) => fmtDate(r.created_at) },
+              { key: 'status', label: 'Status', render: (r) => r.active !== false
+                ? <span className="pill" style={{ color: 'var(--green)', borderColor: 'var(--green)', background: 'rgba(34,197,94,.1)' }}><span className="dot" style={{ background: 'var(--green)' }} />Active</span>
+                : <span className="pill" style={{ color: 'var(--muted)', borderColor: 'var(--muted)', background: 'rgba(143,160,184,.1)' }}><span className="dot" style={{ background: 'var(--muted)' }} />Deleted</span> },
+              { key: 'actions', label: '', render: (r) => (
                 <span className="row-actions">
-                  <button className="btn secondary sm" onClick={() => openEdit(r)}>Edit</button>
-                  <button className="btn danger sm" onClick={() => toggleActive(r)}>{r.active ? 'Delete' : 'Restore'}</button>
+                  {canManage && <button className="btn secondary sm" onClick={(ev) => { ev.stopPropagation(); openEdit(r); }}>Edit</button>}
+                  {canManage && (
+                    <button
+                      className={`btn sm ${r.active !== false ? 'danger' : 'success'}`}
+                      onClick={(ev) => { ev.stopPropagation(); r.active !== false ? setConfirmDel(r) : toggleActive(r); }}
+                    >
+                      {r.active !== false ? 'Delete' : 'Restore'}
+                    </button>
+                  )}
                 </span>
-              ) : null,
-            },
-          ]}
-          rows={rows}
-          empty="No vehicles yet"
-        />
+              )},
+            ]}
+            rows={rows}
+            mobileCard={(r) => (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                  <b>{r.plate}</b>
+                  {r.active !== false
+                    ? <span className="pill" style={{ color: 'var(--green)', borderColor: 'var(--green)' }}><span className="dot" style={{ background: 'var(--green)' }} />Active</span>
+                    : <span className="pill" style={{ color: 'var(--muted)', borderColor: 'var(--muted)' }}><span className="dot" style={{ background: 'var(--muted)' }} />Deleted</span>}
+                </div>
+                <div className="muted" style={{ margin: '4px 0', fontSize: 12.5 }}>
+                  {[r.make, r.model, r.vehicle_type].filter(Boolean).join(' · ') || '—'}{r.driver_name ? ` · driver: ${r.driver_name}` : ''}
+                </div>
+                {canManage && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button className="btn secondary sm" onClick={(ev) => { ev.stopPropagation(); openEdit(r); }}>Edit</button>
+                    <button className={`btn sm ${r.active !== false ? 'danger' : 'success'}`} onClick={(ev) => { ev.stopPropagation(); r.active !== false ? setConfirmDel(r) : toggleActive(r); }}>
+                      {r.active !== false ? 'Delete' : 'Restore'}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+            empty={q ? <EmptyState icon="🔍" title={`No vehicles match “${q}”`} message="Try another plate, make or driver name." /> : <EmptyState title="No vehicles yet" message="Add your first vehicle to start requesting fuel." action={canManage && <button className="btn" onClick={openNew}>+ Add vehicle</button>} />}
+          />
+        )}
       </Card>
+
+      <ConfirmDialog
+        open={!!confirmDel}
+        title={`Delete vehicle ${confirmDel?.plate}?`}
+        message="It will be deactivated and hidden from new requests. All fuel history is preserved — you can restore it any time."
+        confirmLabel="Delete vehicle"
+        danger
+        busy={busy}
+        onConfirm={() => confirmDel && toggleActive(confirmDel)}
+        onCancel={() => setConfirmDel(null)}
+      />
     </>
   );
 }

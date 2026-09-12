@@ -16,7 +16,7 @@
     },
     "android": {
       "package": "com.fleetfuel.app",
-      "softwareKeyboardLayoutMode": "pan"
+      "softwareKeyboardLayoutMode": "resize"
     },
     "plugins": ["expo-router"],
     "experiments": {
