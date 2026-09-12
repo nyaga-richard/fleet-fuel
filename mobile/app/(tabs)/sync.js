@@ -123,7 +123,7 @@ export default function SyncScreen() {
 }
 
 const s = {
-  stat: { backgroundColor: C.bg, borderColor: C.border, borderWidth: 1, borderRadius: 10, padding: 10 },
+  stat: { backgroundColor: C.bg, borderColor: C.border, borderWidth: 1, borderRadius: 14, padding: 12 },
   statLabel: { color: C.muted, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5 },
   statValue: { color: C.text, fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'] },
   metaLabel: { color: C.muted, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5 },

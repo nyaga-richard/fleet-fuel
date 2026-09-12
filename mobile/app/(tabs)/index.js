@@ -147,9 +147,9 @@ const S_GAP = 12;
 
 function StatBox({ label, value, tone, onPress }) {
   const body = (
-    <View style={[s.statBox, { borderColor: tone }]}>
+    <View style={[s.statBox, { borderLeftColor: tone }]}>
       <Text style={{ color: C.muted, fontSize: 11.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</Text>
-      <Text style={{ color: tone, fontSize: 24, fontWeight: '800', marginVertical: 2, fontVariant: ['tabular-nums'] }}>{value}</Text>
+      <Text style={{ color: tone, fontSize: 26, fontWeight: '800', marginVertical: 2, fontVariant: ['tabular-nums'] }}>{value}</Text>
     </View>
   );
   if (!onPress) return <View style={{ flex: 1 }}>{body}</View>;
@@ -162,7 +162,7 @@ function StatBox({ label, value, tone, onPress }) {
 
 const s = {
   section: { color: C.muted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 },
-  statBox: { backgroundColor: C.panel, borderWidth: 1, borderRadius: 12, padding: 14 },
+  statBox: { backgroundColor: C.panel, borderWidth: 1, borderColor: C.border, borderLeftWidth: 3, borderRadius: 14, padding: 16 },
   bar: { height: 5, backgroundColor: C.panel2, borderRadius: 3, overflow: 'hidden' },
   barFill: { height: 5, borderRadius: 3 },
 };
