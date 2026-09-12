@@ -1,14 +1,9 @@
 import React, { useState } from 'react';
-import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert,
-} from 'react-native';
+import { Text, Alert } from 'react-native';
+import { Screen, Card, Btn, Field, Input } from '../src/components';
 import { useAuth } from '../src/auth';
 import { API_URL } from '../src/api';
-
-const C = {
-  bg: '#0b1220', panel: '#14203a', border: '#24344f', text: '#e6ecf5',
-  muted: '#8fa0b8', accent: '#3b82f6', danger: '#ef4444',
-};
+import { C } from '../src/theme';
 
 export default function LoginScreen() {
   const { login } = useAuth();
@@ -18,66 +13,64 @@ export default function LoginScreen() {
   const [error, setError] = useState('');
 
   async function submit() {
-    if (!email || !password) return;
+    if (busy || !email || !password) return;
     setBusy(true);
     setError('');
     try {
       await login(email.trim(), password);
     } catch (e) {
-      setError(e.message);
-      Alert.alert('Sign-in failed', e.message);
+      const msg = e?.status === 0
+        ? "You're offline — sign-in needs connectivity. Queued work stays saved."
+        : e?.status === 401
+          ? 'Wrong email or password.'
+          : e.message;
+      setError(msg);
+      Alert.alert('Sign-in failed', msg);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <KeyboardAvoidingView style={styles.wrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.card}>
-        <Text style={styles.title}>Fleet Fuel</Text>
-        <Text style={styles.sub}>Offline-capable fuel management</Text>
-        {!!error && <Text style={styles.error}>{error}</Text>}
-        <Text style={styles.label}>Email</Text>
-        <TextInput
-          style={styles.input}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="email-address"
-          value={email}
-          onChangeText={setEmail}
-          placeholder="you@company.com"
-          placeholderTextColor={C.muted}
-        />
-        <Text style={styles.label}>Password</Text>
-        <TextInput
-          style={styles.input}
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-          placeholder="••••••••"
-          placeholderTextColor={C.muted}
-        />
-        <TouchableOpacity style={[styles.button, busy && { opacity: 0.5 }]} onPress={submit} disabled={busy}>
-          <Text style={styles.buttonText}>{busy ? 'Signing in…' : 'Sign in'}</Text>
-        </TouchableOpacity>
+    <Screen keyboard scroll>
+      <Card style={{ maxWidth: 430, width: '100%', alignSelf: 'center', marginTop: '20%', padding: 24 }}>
+        <Text style={{ color: C.text, fontSize: 26, fontWeight: '800' }}>⛽ Fleet Fuel</Text>
+        <Text style={{ color: C.muted, fontSize: 13, marginTop: 4, marginBottom: 18 }}>
+          Offline-capable fuel management
+        </Text>
+        {!!error && <Text style={{ color: C.red, fontSize: 12.5, marginBottom: 10 }}>⚠ {error}</Text>}
+        <Field label="Email">
+          <Input
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            textContentType="emailAddress"
+            autoComplete="email"
+            value={email}
+            onChangeText={setEmail}
+            placeholder="you@company.com"
+            returnKeyType="next"
+          />
+        </Field>
+        <Field label="Password">
+          <Input
+            secureTextEntry
+            textContentType="password"
+            autoComplete="password"
+            value={password}
+            onChangeText={setPassword}
+            placeholder="••••••••"
+            onSubmitEditing={submit}
+            returnKeyType="done"
+          />
+        </Field>
+        <Btn label={busy ? 'Signing in…' : 'Sign in'} busy={busy} onPress={submit} disabled={!email || !password} />
         {!API_URL && (
-          <Text style={styles.error}>
-            EXPO_PUBLIC_API_URL is not set — create mobile/.env from .env.example.
+          <Text style={{ color: C.red, fontSize: 12, marginTop: 12 }}>
+            EXPO_PUBLIC_API_URL is not set — create mobile/.env from .env.example and rebuild.
           </Text>
         )}
-      </View>
-    </KeyboardAvoidingView>
+      </Card>
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  card: { width: '100%', maxWidth: 420, backgroundColor: C.panel, borderColor: C.border, borderWidth: 1, borderRadius: 14, padding: 24 },
-  title: { color: C.text, fontSize: 24, fontWeight: '700' },
-  sub: { color: C.muted, fontSize: 13, marginTop: 4, marginBottom: 20 },
-  label: { color: C.muted, fontSize: 12, marginBottom: 6, marginTop: 12 },
-  input: { backgroundColor: C.bg, borderColor: C.border, borderWidth: 1, borderRadius: 8, color: C.text, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
-  button: { backgroundColor: C.accent, borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginTop: 18 },
-  buttonText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  error: { color: C.danger, fontSize: 12.5, marginTop: 10 },
-});
