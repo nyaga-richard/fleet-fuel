@@ -43,9 +43,16 @@ dump_database() {
   # Verify the archive is readable and non-trivial.
   [ -s "$outfile" ] || { rm -f "$outfile"; die "backup file is empty — aborted"; }
   gzip -t "$outfile" || { rm -f "$outfile"; die "backup archive failed verification — removed"; }
-  # A valid dump must contain the schema header.
-  if ! gunzip -c "$outfile" | head -50 | grep -q "PostgreSQL database dump"; then
-    rm -f "$outfile"; die "backup does not look like a pg_dump — removed"
+  # A valid dump must contain the schema header. Capture a slice FIRST, then
+  # grep it: piping gunzip straight into head/grep lets head close the pipe
+  # early, which SIGPIPEs gunzip (exit 141) on any dump larger than the OS
+  # pipe buffer (~64 KiB). With pipefail that fails the pipeline even though
+  # the header was found — good backups were deleted and deploys aborted.
+  local sample
+  sample="$(gunzip -c "$outfile" 2>/dev/null | head -c 8192 || true)"
+  if ! printf '%s\n' "$sample" | grep -q "PostgreSQL database dump"; then
+    rm -f "$outfile"
+    die "backup does not look like a pg_dump — removed (file starts with: $(printf '%s' "$sample" | head -c 100 | tr '\n' ' '))"
   fi
   sha256sum "$outfile" > "$outfile.sha256"
   ln -sfn "$outfile" "$BACKUP_DIR/latest.sql.gz"
