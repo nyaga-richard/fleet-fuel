@@ -81,10 +81,10 @@ export function Table({ columns, rows, empty = 'No records yet', keyField = 'id'
           {rows.length === 0 && (
             <tr><td colSpan={columns.length} className="muted" style={{ textAlign: 'center', padding: 24 }}>{empty}</td></tr>
           )}
-          {rows.map((r) => (
-            <tr key={r[keyField]}>
+          {rows.map((r, i) => (
+            <tr key={r[keyField] ?? r.id ?? i}>
               {columns.map((c) => (
-                <td key={c.key} className={c.num ? 'num' : ''}>
+                <td key={c.key ?? c.label} className={c.num ? 'num' : ''}>
                   {c.render ? c.render(r) : (r[c.key] ?? '—')}
                 </td>
               ))}

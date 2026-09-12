@@ -16,10 +16,28 @@ function Users() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
   const { form, bind, setForm } = useForm({ name: '', email: '', password: '', role: 'attendant', phone: '' });
+  const { form: editForm, bind: bindEdit, setForm: setEditForm } = useForm({ name: '', phone: '', role: 'attendant' });
 
   const load = useCallback(() => api('/api/users').then((r) => setRows(r.users)).catch((e) => setError(e.message)), []);
   useEffect(() => { load(); }, [load]);
+
+  function openEdit(u) {
+    setEditing(u.id);
+    setEditForm({ name: u.name, phone: u.phone || '', role: u.role });
+  }
+
+  async function saveEdit(e) {
+    e.preventDefault();
+    setError('');
+    try {
+      await api(`/api/users/${editing}`, { method: 'PATCH', body: editForm });
+      setNotice('User updated.');
+      setEditing(null);
+      load();
+    } catch (e) { setError(e.message); }
+  }
 
   async function create(e) {
     e.preventDefault();
@@ -43,6 +61,11 @@ function Users() {
     const pw = window.prompt('New password (min 8 chars):');
     if (!pw) return;
     await patch(id, { password: pw }, 'Password updated.');
+  }
+
+  async function remove(u) {
+    if (!window.confirm(`Delete user "${u.name}" (${u.email})?\n\nThe account will be deactivated and can no longer sign in. Audit history is fully preserved; you can restore it any time.`)) return;
+    await patch(u.id, { active: false }, 'User deactivated.');
   }
 
   return (
@@ -69,6 +92,23 @@ function Users() {
             <div><button className="btn">Create user</button></div>
           </form>
         )}
+        {editing && (
+          <form onSubmit={saveEdit} className="grid c3" style={{ marginBottom: 16 }}>
+            <Field label="Name *"><input {...bindEdit('name')} required /></Field>
+            <Field label="Phone"><input {...bindEdit('phone')} /></Field>
+            <Field label="Role *">
+              <select {...bindEdit('role')}>
+                <option value="attendant">Pump Attendant</option>
+                <option value="manager">Fleet Manager</option>
+                <option value="admin">Administrator</option>
+              </select>
+            </Field>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <button className="btn">Save changes</button>
+              <button type="button" className="btn secondary" onClick={() => setEditing(null)}>Cancel</button>
+            </div>
+          </form>
+        )}
         <Table
           columns={[
             { key: 'name', label: 'Name' },
@@ -79,17 +119,16 @@ function Users() {
             {
               key: 'active', label: 'Status', render: (r) => r.active
                 ? <span className="pill" style={{ color: '#22c55e', borderColor: '#22c55e' }}>Active</span>
-                : <span className="pill" style={{ color: '#9ca3af', borderColor: '#9ca3af' }}>Disabled</span>,
+                : <span className="pill" style={{ color: '#9ca3af', borderColor: '#9ca3af' }}>Deleted</span>,
             },
             {
               key: 'actions', label: '', render: (r) => (
                 <span className="row-actions">
+                  <button className="btn secondary sm" onClick={() => openEdit(r)}>Edit</button>
                   <button className="btn secondary sm" onClick={() => resetPassword(r.id)}>Reset password</button>
-                  {r.id !== me.sub && (
-                    <button className="btn secondary sm" onClick={() => patch(r.id, { active: !r.active })}>
-                      {r.active ? 'Disable' : 'Enable'}
-                    </button>
-                  )}
+                  {r.id !== me?.id && (r.active
+                    ? <button className="btn danger sm" onClick={() => remove(r)}>Delete</button>
+                    : <button className="btn secondary sm" onClick={() => patch(r.id, { active: true }, 'User restored.')}>Restore</button>)}
                 </span>
               ),
             },
@@ -98,7 +137,7 @@ function Users() {
           empty="No users"
         />
         <p className="muted" style={{ fontSize: 12 }}>
-          Users are never deleted — disabling preserves audit history.
+          Deleting deactivates the account — audit history is preserved and the user can be restored.
         </p>
       </Card>
     </>

@@ -13,6 +13,7 @@ fuel ledger** — with an offline-capable mobile app for pump attendants and man
 
 **→ New here? Follow the complete walkthrough: [DEPLOY.md — Step-by-Step Deployment Guide](DEPLOY.md)**
 **→ Daily driving? [CHEATSHEET.md — Command Cheat Sheet](CHEATSHEET.md)**
+**→ Mobile app rollout? [MOBILE.md — Mobile Deployment Guide](MOBILE.md)**
 
 ---
 

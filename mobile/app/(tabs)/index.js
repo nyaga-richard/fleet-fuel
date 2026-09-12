@@ -1,7 +1,6 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { useEffect } from 'react';
 import { kvGet, cachedTransactions, outboxCount } from '../../src/db';
 import { getSyncState, onSyncChange, fullSync } from '../../src/sync';
 

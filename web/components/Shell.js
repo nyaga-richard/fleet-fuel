@@ -27,6 +27,11 @@ export default function Shell({ children }) {
   const pathname = usePathname();
   if (!ready) return <div className="login-wrap"><p className="muted">Loading…</p></div>;
   if (!user) return null; // redirecting to /login
+  if (!user.id || !user.role) {
+    // Corrupt/stale cached profile (e.g. from an older schema) — sign out cleanly.
+    logout();
+    return <div className="login-wrap"><p className="muted">Session refreshed — signing in again…</p></div>;
+  }
 
   return (
     <div className="shell">
