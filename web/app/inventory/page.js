@@ -3,7 +3,7 @@
 // Adjustments and receipts are manager/admin actions; anyone can view.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, SearchInput, Tabs, Notice, Stat, Field, DataTable, Skeleton, StatusPill } from '@/components/ui';
+import { Card, PageHeader, SearchInput, Tabs, Notice, Stat, Field, DataTable, Skeleton, StatusPill, useForm } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fmtQty, fmtDateTime } from '@/lib/format';

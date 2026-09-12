@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { Screen, Card, Btn, Field, Input, Chip, KV, StatusBadge } from '../src/components';
-import { cachedRequests, cachedPumps, cachedVehicles, cachedFuelTypes, enqueue, outboxCount } from '../src/db';
-import { getSyncState } from '../src/sync';
-import { useAuth } from '../src/auth';
-import { C } from '../src/theme';
-import { fmtQty } from '../src/fmt';
+import { Screen, Card, Btn, Field, Input, Chip, KV, StatusBadge } from '../../src/components';
+import { cachedRequests, cachedPumps, cachedVehicles, cachedFuelTypes, enqueue, outboxCount } from '../../src/db';
+import { getSyncState } from '../../src/sync';
+import { useAuth } from '../../src/auth';
+import { C } from '../../src/theme';
+import { fmtQty } from '../../src/fmt';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fueling flow (spec §18) — one carefully ordered, keyboard-aware form:
