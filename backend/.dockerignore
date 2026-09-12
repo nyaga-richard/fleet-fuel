@@ -1,0 +1,10 @@
+node_modules/
+npm-debug.log*
+.env
+.env.*
+!.env.example
+uploads/
+*.sql.gz
+*.dump
+coverage/
+.DS_Store

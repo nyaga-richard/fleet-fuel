@@ -1,0 +1,106 @@
+# ============================================================================
+# Fleet Fuel Management System — base compose file
+#
+# Works for local development out of the box:
+#   docker compose up -d --build
+#
+# Production uses the override:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   (scripts/deploy.sh does this for you, plus backup + migrations + checks)
+#
+# DATA SAFETY: named volumes below have explicit stable names so that
+# `docker compose down` (WITHOUT -v) never loses data. NEVER run
+# `docker compose down -v` against a production installation.
+# ============================================================================
+
+name: fleet-fuel
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: fleetfuel-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fleetfuel}
+      POSTGRES_USER: ${POSTGRES_USER:-fleetfuel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}
+      TZ: ${TZ:-Africa/Nairobi}
+    volumes:
+      # PERSISTENT DATABASE — never stored in the container filesystem.
+      - fleetfuel_postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # Dev convenience only. The production override binds this to
+      # 127.0.0.1 so the database is never reachable from the network.
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GIT_BRANCH: ${GIT_BRANCH:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        APP_VERSION: ${APP_VERSION:-1.0.0}
+    image: fleet-fuel-backend:local
+    container_name: fleetfuel-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 4000
+      TZ: ${TZ:-Africa/Nairobi}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required in .env}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in .env}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-12h}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      # Startup order: entrypoint waits for postgres health, runs pending
+      # migrations (idempotent, advisory-locked), then starts the API.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # PERSISTENT uploaded files (documents, receipts, invoices, images).
+      - fleetfuel_uploads:/app/uploads
+    ports:
+      - "${API_PORT:-4000}:4000"
+
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GIT_BRANCH: ${GIT_BRANCH:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        APP_VERSION: ${APP_VERSION:-1.0.0}
+    image: fleet-fuel-web:local
+    container_name: fleetfuel-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-Africa/Nairobi}
+      PORT: 3000
+    depends_on:
+      - backend
+    ports:
+      # WEB_BIND defaults to 0.0.0.0 for development convenience.
+      # Production .env MUST set WEB_BIND=127.0.0.1 (install.sh does this).
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-3000}:3000"
+
+# ── Persistent named volumes (stable explicit names) ────────────────────────
+volumes:
+  fleetfuel_postgres_data:
+    name: fleetfuel_postgres_data
+  fleetfuel_uploads:
+    name: fleetfuel_uploads

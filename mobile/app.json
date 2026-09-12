@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Fleet Fuel",
+    "slug": "fleet-fuel",
+    "version": "1.0.0",
+    "scheme": "fleetfuel",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0b1220",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.fleetfuel.app"
+    },
+    "android": {
+      "package": "com.fleetfuel.app",
+      "softwareKeyboardLayoutMode": "pan"
+    },
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "apiUrlOverrides": "Set EXPO_PUBLIC_API_URL in mobile/.env (see .env.example)"
+    }
+  }
+}

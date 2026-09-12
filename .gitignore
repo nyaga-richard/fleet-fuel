@@ -1,0 +1,45 @@
+# ── Secrets & environment (NEVER commit) ─────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Dependencies ─────────────────────────────────────────────
+node_modules/
+
+# ── Build output ─────────────────────────────────────────────
+.next/
+dist/
+build/
+out/
+.expo/
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+
+# ── Runtime data (NEVER commit production data) ──────────────
+uploads/
+backups/
+*.sql.gz
+*.dump
+
+# ── Local databases ──────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+
+# ── Deployment state (commit history recorded at deploy time) ─
+.deploy/
+
+# ── OS / editor noise ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# ── Test coverage ────────────────────────────────────────────
+coverage/
+
+# NOTE: migration files (backend/migrations/*) and source code are
+# NEVER ignored — they are part of the deployable application.

@@ -1,0 +1,49 @@
+# ============================================================================
+# Fleet Fuel Management System — PRODUCTION override
+#
+# Applied on top of docker-compose.yml:
+#   docker compose --env-file /opt/fleet-fuel/.env \
+#     -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# scripts/deploy.sh does this automatically.
+#
+# Production rules enforced here:
+#   * Port bindings come from the environment file. install.sh writes
+#     POSTGRES_BIND/API_BIND/WEB_BIND=127.0.0.1 into /opt/fleet-fuel/.env,
+#     so NOTHING is reachable from the network — public access is
+#     EXCLUSIVELY via the Cloudflare Tunnel (outbound-only, no port
+#     forwarding on the router).
+#   * Backups live OUTSIDE containers in ${BACKUP_DIR} on the host and are
+#     taken by scripts/backup.sh (host cron — configured by install.sh).
+#   * cloudflared runs only when the `tunnel` profile is enabled AND
+#     CLOUDFLARE_TUNNEL_TOKEN is configured (deploy.sh decides).
+#   * Data volumes are untouched by deployments. NEVER use `down -v`.
+# ============================================================================
+
+services:
+
+  backend:
+    volumes:
+      - fleetfuel_uploads:/app/uploads
+      # Read-only view of host backups (convenience for ops/debugging).
+      - ${BACKUP_DIR:-/opt/fleet-fuel/backups}:/backups:ro
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.1
+    container_name: fleetfuel-cloudflared
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    # Connects OUTBOUND to Cloudflare only. No inbound ports required.
+    # Token from Zero Trust → Networks → Tunnels (remotely-managed tunnel).
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-MISSING}
+    environment:
+      TZ: ${TZ:-Africa/Nairobi}
+      TUNNEL_METRICS: 0.0.0.0:60123
+    depends_on:
+      - backend
+      - web
+    # Lets tunnel rules target HOST-published ports as an alternative to the
+    # docker-network names, e.g. http://host.docker.internal:3000 or
+    # http://host.docker.internal:8080 (whatever WEB_PORT/API_PORT you set).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
