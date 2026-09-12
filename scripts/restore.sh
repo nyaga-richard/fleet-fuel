@@ -54,7 +54,9 @@ echo "Backup file     : $FILE ($(du -h "$FILE" | cut -f1))"
 # ── 1. Verify backup ─────────────────────────────────────────────────────────
 info "verifying backup archive ..."
 gzip -t "$FILE" || die "archive is corrupt"
-gunzip -c "$FILE" | head -50 | grep -q "PostgreSQL database dump" || die "not a pg_dump file"
+# SIGPIPE-safe header check (see backup.sh): capture a slice, then grep it.
+RESTORE_SAMPLE="$(gunzip -c "$FILE" 2>/dev/null | head -c 8192 || true)"
+printf '%s\n' "$RESTORE_SAMPLE" | grep -q "PostgreSQL database dump" || die "not a pg_dump file"
 if [ -f "$FILE.sha256" ]; then
   sha256sum -c "$FILE.sha256" >/dev/null 2>&1 && ok "sha256 checksum matches" || warn "checksum mismatch (continuing — archive verified structurally)"
 fi
