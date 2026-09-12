@@ -26,7 +26,7 @@ svc_healthy() { [ "$(docker inspect --format '{{if .State.Health}}{{.State.Healt
 
 echo
 printf "${C_BOLD}Fleet Fuel System Status${C_OFF}\n"
-printf "------------------------\n"
+printf '%s\n' "------------------------"
 
 # ── Services ─────────────────────────────────────────────────────────────────
 printf "%-18s" "PostgreSQL:"
@@ -83,7 +83,8 @@ printf "%-18s" "Last Backup:"
 LAST_BAK="$(ls -1t "$BACKUP_DIR"/fleetfuel_*.sql.gz 2>/dev/null | head -1 || true)"
 if [ -n "$LAST_BAK" ]; then
   ts=$(basename "$LAST_BAK"); ts="${ts#fleetfuel_}"; ts="${ts%.sql.gz}"
-  age=$(( ($(date +%s) - $(date -d "${ts%_*} ${ts#*_}" +%s)) / 3600 ))
+  d="${ts%_*}"; t="${ts#*_}"; t="${t:0:2}:${t:2:2}:${t:4:2}"   # 090000 → 09:00:00
+  age=$(( ($(date +%s) - $(date -d "$d $t" +%s)) / 3600 ))
   if [ "$age" -le 26 ]; then printf "${C_GREEN}%s${C_OFF} (%dh ago)\n" "$ts" "$age"
   else printf "${C_YELLOW}%s${C_OFF} (${age}h ago — STALE, check cron)\n" "$ts"; fi
 else printf "${C_RED}none${C_OFF}\n"; fi
