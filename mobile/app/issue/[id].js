@@ -1,28 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Screen, Card, Btn, Field, Input, Chip, KV, StatusBadge } from '../../src/components';
 import { cachedRequests, cachedPumps, cachedVehicles, cachedFuelTypes, enqueue, outboxCount } from '../../src/db';
 import { getSyncState } from '../../src/sync';
-import { useAuth } from '../../src/auth';
-import { C } from '../../src/theme';
+import { C, spacing as SP } from '../../theme';
 import { fmtQty } from '../../src/fmt';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Fueling flow (spec §18) — one carefully ordered, keyboard-aware form:
+// Fueling flow (spec §18) — a guided, keyboard-aware workflow:
 //   1 Confirm vehicle → 2 Odometer → 3 Pump → 4 Start meter
-//   → 5 Quantity (protected: shows AUTHORIZED, warns on excess)
-//   → 6 End meter → 7 Review → 8 Complete
-// Completing queues the transaction OFFLINE-FIRST (idempotent op_id) and then
-// shows the confirmation panel (spec §39). Double-submission is impossible:
-// the button disables + shows "Completing…" while busy (spec §40).
+//   → 5 Quantity (protected) → 6 End meter → 7 Review → 8 Complete
+// Queues OFFLINE-FIRST (idempotent op_id); confirmation shows SYNCED /
+// PENDING SYNC (spec §39). Double-submission impossible (spec §40).
 // Payload shape is EXACTLY what the server's sync endpoint has always
 // accepted for op type 'fuel_transaction' — business logic untouched.
 // ─────────────────────────────────────────────────────────────────────────────
 export default function FuelingFlow() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
-  const { user } = useAuth();
   const [req, setReq] = useState(null);
   const [vehicle, setVehicle] = useState(null);
   const [fuel, setFuel] = useState(null);
@@ -33,7 +29,7 @@ export default function FuelingFlow() {
   const [quantity, setQuantity] = useState('');
   const [endMeter, setEndMeter] = useState('');
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(null); // confirmation payload
+  const [done, setDone] = useState(null);
   const [queuedBefore, setQueuedBefore] = useState(0);
 
   useFocusEffect(useCallback(() => {
@@ -66,7 +62,7 @@ export default function FuelingFlow() {
     if (busy || !req || !pumpId || !Number.isFinite(qty) || qty <= 0) return;
     setBusy(true);
     try {
-      const opId = await enqueue('fuel_transaction', {
+      await enqueue('fuel_transaction', {
         request_no: req.request_no, // resolved server-side; works across devices
         pump_id: pumpId,
         quantity: qty,
@@ -76,9 +72,15 @@ export default function FuelingFlow() {
       });
       const pendingNow = await outboxCount();
       setDone({
-        opId,
-        synced: pendingNow <= queuedBefore && getSyncState().ok !== false ? true : false,
-        txn: { request_no: req.request_no, plate: req.plate || vehicle?.plate, fuel: fuel?.name, authorized, issued: qty, pump: (pumps.find((p) => p.id === pumpId) || {}).name },
+        synced: pendingNow <= queuedBefore,
+        txn: {
+          request_no: req.request_no,
+          plate: req.plate || vehicle?.plate,
+          fuel: fuel?.name,
+          authorized,
+          issued: qty,
+          pump: (pumps.find((p) => p.id === pumpId) || {}).name,
+        },
       });
     } finally {
       setBusy(false);
@@ -93,14 +95,14 @@ export default function FuelingFlow() {
     );
   }
 
-  // ── Confirmation screen (spec §39) ─────────────────────────────────────────
+  // ── Confirmation (spec §39) ────────────────────────────────────────────────
   if (done) {
     return (
       <Screen scroll>
-        <Card style={{ borderColor: C.green, borderWidth: 1, alignItems: 'center', paddingVertical: 28 }}>
-          <Text style={{ fontSize: 40, marginBottom: 8 }}>✓</Text>
+        <Card style={{ borderColor: C.green, borderWidth: 1, alignItems: 'center', paddingVertical: SP.xl }}>
+          <Text style={{ fontSize: 38, marginBottom: 6 }}>✓</Text>
           <Text style={{ color: C.text, fontSize: 19, fontWeight: '800' }}>Fueling completed</Text>
-          <Text style={{ color: C.green, fontSize: 12.5, fontWeight: '700', marginTop: 4 }}>
+          <Text style={{ color: done.synced ? C.green : C.amber, fontSize: 12.5, fontWeight: '700', marginTop: 4 }}>
             {done.synced ? 'Status: SYNCED' : 'Status: PENDING SYNC'}
           </Text>
         </Card>
@@ -116,69 +118,53 @@ export default function FuelingFlow() {
         </Card>
         {!done.synced && (
           <Card>
-            <Text style={{ color: C.amber, fontSize: 12.5 }}>
+            <Text style={{ color: '#fcd34d', fontSize: 12.5 }}>
               You're offline — the transaction is saved on this device and will synchronize exactly once when Internet returns. Do not re-enter it.
             </Text>
           </Card>
         )}
-        <View style={{ flexDirection: 'row', gap: 10 }}>
-          <View style={{ flex: 1 }}>
-            <Btn label="Done" onPress={() => router.back()} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Btn label="Open Sync" variant="secondary" onPress={() => router.back()} />
-          </View>
-        </View>
+        <Btn label="Done" onPress={() => router.back()} />
       </Screen>
     );
   }
 
-  // ── Fueling form ────────────────────────────────────────────────────────────
+  // ── Workflow ────────────────────────────────────────────────────────────────
   return (
     <Screen scroll keyboard>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <Text style={{ color: C.accent2, fontSize: 22 }} onPress={() => router.back()}>←</Text>
-        <Text style={{ color: C.text, fontSize: 17, fontWeight: '800' }}>Fueling — {req.request_no || 'pending sync'}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 12 }}>
+        <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Text style={{ color: C.accent2, fontSize: 22 }}>←</Text>
+        </TouchableOpacity>
+        <Text style={{ color: C.text, fontSize: 17, fontWeight: '800', flexShrink: 1 }} numberOfLines={1}>Fueling — {req.request_no || 'pending sync'}</Text>
       </View>
 
-      {/* 1 · Confirm vehicle */}
       <Step n={1} title="Confirm vehicle">
         <Card style={{ marginBottom: 0 }}>
           <KV rows={[
             ['Vehicle', req.plate || vehicle?.plate || '—'],
-            ['Make / model', vehicle ? [vehicle.make, vehicle.model].filter(Boolean).join(' ') : '—'],
+            ['Make / model', vehicle ? [vehicle.make, vehicle.model].filter(Boolean).join(' ') || '—' : '—'],
             ['Fuel type', fuel?.name || '—'],
-            ['Status', null],
           ]} />
-          <View style={{ alignItems: 'flex-start', marginTop: 6 }}><StatusBadge status={req.status} /></View>
+          <View style={{ alignItems: 'flex-start', marginTop: 8 }}><StatusBadge status={req.status} /></View>
         </Card>
       </Step>
 
-      {/* 2 · Odometer */}
       <Step n={2} title="Odometer (km)">
-        <Field hint="Current vehicle odometer — numeric only">
-          <Input
-            keyboardType="number-pad"
-            value={odometer}
-            onChangeText={setOdometer}
-            placeholder="e.g. 105000"
-            returnKeyType="next"
-          />
+        <Field hint="Current vehicle odometer">
+          <Input keyboardType="number-pad" value={odometer} onChangeText={setOdometer} placeholder="e.g. 105000" returnKeyType="next" />
         </Field>
       </Step>
 
-      {/* 3 · Pump */}
       <Step n={3} title="Select pump">
         {pumps.length === 0
           ? <Text style={{ color: C.muted, fontSize: 13 }}>No pumps cached — sync first (Home → pull down).</Text>
           : (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm }}>
               {pumps.map((p) => <Chip key={p.id} label={p.name} sub={p.tank_name} active={pumpId === p.id} onPress={() => setPumpId(p.id)} />)}
             </View>
           )}
       </Step>
 
-      {/* 4 · Start meter */}
       <Step n={4} title="Pump start meter">
         <Field hint="Optional — closing meter is calculated if left out">
           <Input
@@ -191,7 +177,6 @@ export default function FuelingFlow() {
         </Field>
       </Step>
 
-      {/* 5 · Quantity — PROTECTED (spec §19) */}
       <Step n={5} title="Fuel quantity (L)">
         <Field hint={`Authorized: ${fmtQty(authorized)}`} error={qtyInvalid ? 'Enter a valid quantity' : excess ? `Excess fuel requires manager approval. Authorized: ${fmtQty(authorized)}.` : null}>
           <Input
@@ -212,7 +197,6 @@ export default function FuelingFlow() {
         )}
       </Step>
 
-      {/* 6 · End meter */}
       <Step n={6} title="Pump end meter">
         <Field hint={suggestedEnd ? `Suggested from start meter: ${suggestedEnd}` : 'Optional — closing scale reading'}>
           <Input
@@ -225,7 +209,6 @@ export default function FuelingFlow() {
         </Field>
       </Step>
 
-      {/* 7 · Review */}
       <Step n={7} title="Review">
         <Card style={{ marginBottom: 0 }}>
           <KV rows={[
@@ -241,14 +224,14 @@ export default function FuelingFlow() {
         </Card>
       </Step>
 
-      {/* 8 · Complete */}
       <Btn
-        label={busy ? 'Completing…' : '✓ COMPLETE FUELING'}
+        label={busy ? 'COMPLETING…' : '✓ COMPLETE FUELING'}
         variant="success"
+        large
         busy={busy}
         disabled={!canComplete}
         onPress={complete}
-        style={{ marginTop: 6, marginBottom: 30 }}
+        style={{ marginTop: 4, marginBottom: 26 }}
       />
     </Screen>
   );
@@ -256,7 +239,7 @@ export default function FuelingFlow() {
 
 function Step({ n, title, children }) {
   return (
-    <View style={{ marginBottom: 16 }}>
+    <View style={{ marginBottom: 14 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>{n}</Text>

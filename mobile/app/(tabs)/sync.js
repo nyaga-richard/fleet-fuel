@@ -2,13 +2,14 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, FlatList, RefreshControl } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
-  Screen, ScreenHeader, Card, Btn, EmptyState, StatusBadge, useNetState,
+  Screen, ScreenHeader, SectionHeader, Card, Btn, EmptyState, StatusBadge,
+  useNetState, useTabBarPad,
 } from '../../src/components';
 import { pendingOps, outboxCount, deviceId, kvGet } from '../../src/db';
 import { fullSync, getSyncState, onSyncChange } from '../../src/sync';
 import { API_URL } from '../../src/api';
-import { C } from '../../src/theme';
-import { fmtDateTime, fmtRel } from '../../src/fmt';
+import { C, spacing as SP } from '../../theme';
+import { fmtDateTime } from '../../src/fmt';
 
 // Sync status (spec §28) — never hides failures, never auto-deletes them.
 export default function SyncScreen() {
@@ -20,6 +21,7 @@ export default function SyncScreen() {
   const [lastSync, setLastSync] = useState(null);
   const [state, setState] = useState(getSyncState());
   const [busy, setBusy] = useState(false);
+  const bottomPad = useTabBarPad();
 
   const load = useCallback(async () => {
     const all = await pendingOps(100);
@@ -49,30 +51,26 @@ export default function SyncScreen() {
       />
 
       <Card>
-        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
-          <View style={[s.stat, { flex: 1 }]}>
-            <Text style={s.statLabel}>Pending</Text>
-            <Text style={[s.statValue, { color: count > 0 ? C.amber : C.green }]}>{count}</Text>
-          </View>
-          <View style={[s.stat, { flex: 1 }]}>
-            <Text style={s.statLabel}>Failed</Text>
-            <Text style={[s.statValue, { color: failed > 0 ? C.red : C.green }]}>{failed}</Text>
-          </View>
-          <View style={[s.stat, { flex: 1.4 }]}>
-            <Text style={s.statLabel}>Last sync</Text>
-            <Text style={[s.statValue, { color: C.text, fontSize: 13, marginTop: 8 }]}>{fmtRel(lastSync)}</Text>
-          </View>
-        </View>
-        <Text style={{ color: C.muted, fontSize: 12 }}>
+        <Text style={{ color: C.muted, fontSize: 12, marginBottom: SP.sm }}>
           {lastSync ? `Last successful sync: ${fmtDateTime(lastSync)}` : 'Never synced on this device'}
           {' · '}{net.isConnected ? '● online' : '● offline'}
         </Text>
+        <View style={{ flexDirection: 'row', gap: SP.md }}>
+          <View style={[s.stat, { flex: 1 }]}>
+            <Text style={[s.statValue, { color: count > 0 ? C.amber : C.green }]}>{count}</Text>
+            <Text style={s.statLabel}>Pending</Text>
+          </View>
+          <View style={[s.stat, { flex: 1 }]}>
+            <Text style={[s.statValue, { color: failed > 0 ? C.red : C.green }]}>{failed}</Text>
+            <Text style={s.statLabel}>Failed</Text>
+          </View>
+        </View>
         {state.message && !state.syncing && (
-          <Text style={{ color: state.ok ? C.green : C.amber, fontSize: 12, marginTop: 6 }}>{state.message}</Text>
+          <Text style={{ color: state.ok ? C.green : C.amber, fontSize: 12, marginTop: SP.sm }}>{state.message}</Text>
         )}
-        <Btn label={busy ? 'Syncing…' : '🔄 SYNC NOW'} onPress={syncNow} busy={busy} style={{ marginTop: 12 }} />
+        <Btn label={busy ? 'Syncing…' : 'SYNC NOW'} onPress={syncNow} busy={busy} style={{ marginTop: SP.md }} />
         {!net.isConnected && (
-          <Text style={{ color: '#fcd34d', fontSize: 12, marginTop: 8 }}>
+          <Text style={{ color: '#fcd34d', fontSize: 12, marginTop: SP.sm }}>
             You're offline. Everything you complete stays saved on this device and syncs when connectivity returns.
           </Text>
         )}
@@ -91,13 +89,11 @@ export default function SyncScreen() {
       <Card>
         <Text style={s.metaLabel}>API URL</Text>
         <Text style={s.mono}>{API_URL || 'NOT CONFIGURED (mobile/.env)'}</Text>
-        <Text style={[s.metaLabel, { marginTop: 8 }]}>Device ID</Text>
+        <Text style={[s.metaLabel, { marginTop: SP.sm }]}>Device ID</Text>
         <Text style={s.mono}>{device || '—'}</Text>
       </Card>
 
-      <Text style={{ color: C.muted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginVertical: 8 }}>
-        Offline queue
-      </Text>
+      <SectionHeader>Offline queue</SectionHeader>
       <FlatList
         data={ops}
         keyExtractor={(item) => item.op_id}
@@ -116,7 +112,7 @@ export default function SyncScreen() {
           <EmptyState icon="✓" title="Queue is empty" message="Everything from this device is on the server." />
         )}
         refreshControl={<RefreshControl refreshing={busy} onRefresh={syncNow} tintColor={C.muted} />}
-        contentContainerStyle={{ paddingBottom: 30 }}
+        contentContainerStyle={{ paddingBottom: bottomPad }}
       />
     </Screen>
   );
@@ -127,5 +123,5 @@ const s = {
   statLabel: { color: C.muted, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5 },
   statValue: { color: C.text, fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'] },
   metaLabel: { color: C.muted, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5 },
-  mono: { color: C.text, fontSize: 12.5, fontFamily: undefined },
+  mono: { color: C.text, fontSize: 12.5, fontVariant: ['tabular-nums'] },
 };

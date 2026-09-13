@@ -1,17 +1,18 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, FlatList } from 'react-native';
+import { Text, FlatList } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuth } from '../../src/auth';
 import {
-  Screen, ScreenHeader, Card, StatusBadge, Btn, SearchBar, EmptyState, OfflineBanner, useDebounced,
+  Screen, ScreenHeader, SectionHeader, Card, Btn, SearchBar, EmptyState,
+  OfflineBanner, RequestCard, TxnCard, useDebounced, useTabBarPad,
 } from '../../src/components';
 import { cachedRequests, cachedTransactions, outboxCount, kvGet } from '../../src/db';
-import { C } from '../../src/theme';
-import { fmtQty, fmtDateTime, todayKey } from '../../src/fmt';
+import { C } from '../../theme';
+import { fmtQty, todayKey } from '../../src/fmt';
 
 // Fueling (spec §30) — the attendant lands directly on authorized requests.
-// NO issuing from list rows: tapping opens the request details, and the
-// ISSUE FUEL action lives only there (spec §14/§17).
+// No issuing from list rows: tapping opens Request Details; ISSUE FUEL lives
+// only there (spec §14/§17).
 export default function FuelingScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -45,16 +46,13 @@ export default function FuelingScreen() {
   const issuedToday = txns
     .filter((t) => String(t.created_at || '').slice(0, 10) === today && !t.reversal_of)
     .reduce((a, t) => a + Number(t.quantity || 0), 0);
+  const bottomPad = useTabBarPad();
 
   if (!canIssue) {
     return (
       <Screen>
         <ScreenHeader title="Fueling" subtitle="Dispensing" />
-        <Card>
-          <Text style={{ color: C.muted, fontSize: 13.5 }}>
-            Your role does not dispense fuel. Fuel requests and approvals are your tools — see Requests.
-          </Text>
-        </Card>
+        <Card><Text style={{ color: C.muted, fontSize: 13.5 }}>Your role does not dispense fuel. Fuel requests and approvals are your tools — see Requests.</Text></Card>
       </Screen>
     );
   }
@@ -79,18 +77,7 @@ export default function FuelingScreen() {
       <FlatList
         data={filtered}
         keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => (
-          <Card onPress={() => router.push(`/request/${item.id}`)}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={{ color: C.muted, fontSize: 12, fontWeight: '700' }}>{item.request_no || '⏳ pending sync'}</Text>
-              <StatusBadge status={item.status} />
-            </View>
-            <Text style={{ color: C.text, fontSize: 16, fontWeight: '700', marginVertical: 4 }}>
-              {item.plate || '—'} · {fmtQty(item.quantity)}
-            </Text>
-            <Text style={{ color: C.muted, fontSize: 12 }}>Tap for details → Issue fuel</Text>
-          </Card>
-        )}
+        renderItem={({ item }) => <RequestCard request={item} onPress={() => router.push(`/request/${item.id}`)} />}
         ListEmptyComponent={(
           <EmptyState
             icon="🚚"
@@ -103,25 +90,15 @@ export default function FuelingScreen() {
         )}
         ListFooterComponent={(
           <>
-            <Text style={{ color: C.muted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginVertical: 10 }}>Recent fueling</Text>
-            {txns.slice(0, 5).map((t) => (
-              <Card key={String(t.id)}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ color: C.muted, fontSize: 12, fontWeight: '700' }}>{t.txn_no || 'FT-…'}</Text>
-                  <StatusBadge status={t.status} />
-                </View>
-                <Text style={{ color: C.text, fontSize: 14.5, fontWeight: '600', marginVertical: 3 }}>
-                  {t.plate || '—'} · {fmtQty(t.quantity)}
-                </Text>
-                <Text style={{ color: C.muted, fontSize: 12 }}>{fmtDateTime(t.created_at)}</Text>
-              </Card>
-            ))}
-            {txns.length === 0 && <Text style={{ color: C.muted, fontSize: 12.5 }}>Nothing issued yet from this device.</Text>}
+            {txns.length > 0 && <SectionHeader style={{ marginTop: SP_TOP }}>Recent fueling</SectionHeader>}
+            {txns.slice(0, 4).map((t) => <TxnCard key={String(t.id)} txn={t} />)}
           </>
         )}
-        contentContainerStyle={{ paddingBottom: 30 }}
+        contentContainerStyle={{ paddingBottom: bottomPad }}
         initialNumToRender={8}
       />
     </Screen>
   );
 }
+
+const SP_TOP = 16;
