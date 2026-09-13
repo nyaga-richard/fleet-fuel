@@ -1,7 +1,13 @@
 'use client';
+
+const ROLE_OPTIONS = [
+  { value: 'attendant', label: 'Pump Attendant' },
+  { value: 'manager', label: 'Fleet Manager' },
+  { value: 'admin', label: 'Administrator' },
+];
 import { useCallback, useEffect, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, Table, Notice, useForm, Field } from '@/components/ui';
+import { Card, Table, Notice, useForm, Field, SearchableSelect } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fmtDate } from '@/lib/format';
@@ -82,11 +88,7 @@ function Users() {
             <Field label="Email *"><input type="email" {...bind('email')} required /></Field>
             <Field label="Password *"><input type="password" {...bind('password')} required minLength={8} /></Field>
             <Field label="Role *">
-              <select {...bind('role')}>
-                <option value="attendant">Pump Attendant</option>
-                <option value="manager">Fleet Manager</option>
-                <option value="admin">Administrator</option>
-              </select>
+              <SearchableSelect {...bind('role')} placeholder="Select role…" options={ROLE_OPTIONS} />
             </Field>
             <Field label="Phone"><input {...bind('phone')} /></Field>
             <div><button className="btn">Create user</button></div>
@@ -97,11 +99,7 @@ function Users() {
             <Field label="Name *"><input {...bindEdit('name')} required /></Field>
             <Field label="Phone"><input {...bindEdit('phone')} /></Field>
             <Field label="Role *">
-              <select {...bindEdit('role')}>
-                <option value="attendant">Pump Attendant</option>
-                <option value="manager">Fleet Manager</option>
-                <option value="admin">Administrator</option>
-              </select>
+              <SearchableSelect {...bindEdit('role')} placeholder="Select role…" options={ROLE_OPTIONS} />
             </Field>
             <div style={{ gridColumn: '1 / -1' }}>
               <button className="btn">Save changes</button>

@@ -1,7 +1,14 @@
 // HTTP client for the Fleet Fuel API.
 // Base URL comes from EXPO_PUBLIC_API_URL (build-time env, see .env.example).
 // Never hard-code localhost or LAN IPs in production builds.
-import { kvGet } from './db';
+//
+// ── Centralized authentication failure handling (spec §5/§6) ────────────────
+// EVERY request goes through request() here. A 401 from any authenticated
+// endpoint clears the local session exactly once and fires the single
+// unauthorized handler registered by AuthProvider — no screen implements its
+// own expiry logic, and no redirect loop can occur (the session is cleared
+// BEFORE the handler runs; the handler only updates UI state).
+import { kvGet, kvRemove, kvSet } from './db';
 
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL || '').replace(/\/+$/, '');
 
@@ -15,6 +22,9 @@ export class ApiError extends Error {
     this.status = status;
   }
 }
+
+let unauthorizedHandler = null;
+export function setUnauthorizedHandler(fn) { unauthorizedHandler = fn; }
 
 async function request(path, { method = 'GET', body, token } = {}) {
   if (!API_URL) throw new ApiError('EXPO_PUBLIC_API_URL is not configured (mobile/.env)', 0);
@@ -34,9 +44,24 @@ async function request(path, { method = 'GET', body, token } = {}) {
   }
   let data = {};
   try { data = await res.json(); } catch { /* empty */ }
-  if (!res.ok) throw new ApiError(data?.error?.message || `Request failed (${res.status})`, res.status);
+  if (!res.ok) {
+    // Session expired/invalid → clear locally and let AuthProvider route to
+    // sign-in with a clear message. Never triggered for the login endpoint
+    // itself (a wrong password must not look like an expired session), and
+    // never for explicit anonymous calls (token === null).
+    if (res.status === 401 && t && path !== '/api/auth/login') {
+      await kvRemove('token');
+      await kvRemove('user');
+      try {
+        await kvSet('session_notice', 'Your session has expired. Please sign in again.');
+      } catch { /* non-fatal */ }
+      if (unauthorizedHandler) unauthorizedHandler();
+    }
+    throw new ApiError(data?.error?.message || `Request failed (${res.status})`, res.status);
+  }
   return data;
 }
+
 
 export const api = {
   login: (email, password) =>

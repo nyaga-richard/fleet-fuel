@@ -5,7 +5,7 @@ import { useAuth } from '../../src/auth';
 import {
   Screen, ScreenHeader, SectionHeader, StatusBadge, Btn, Field, Input, Chip,
   SearchBar, FilterButton, EmptyState, OfflineBanner, Sheet, RequestCard,
-  useDebounced, useTabBarPad,
+  SelectField, useDebounced, useTabBarPad,
 } from '../../src/components';
 import {
   cachedRequests, cachedVehicles, cachedFuelTypes, enqueue, outboxCount, kvGet,
@@ -273,20 +273,22 @@ function NewRequestSheet({ visible, onClose, onSaved, user }) {
         </>
       )}
     >
-      <Field label="Vehicle *" hint={vehicles.length === 0 ? 'No vehicles cached — sync first (Home → pull down).' : null}>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm }}>
-          {vehicles.map((v) => (
-            <Chip key={v.id} label={v.plate} sub={v.make} active={vehicleId === v.id} onPress={() => setVehicleId(v.id)} />
-          ))}
-        </View>
-      </Field>
-      <Field label="Fuel type *">
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm }}>
-          {fuels.map((f) => (
-            <Chip key={f.id} label={f.name} active={fuelId === f.id} onPress={() => setFuelId(f.id)} />
-          ))}
-        </View>
-      </Field>
+      <SelectField
+        label="Vehicle *"
+        placeholder="Select vehicle"
+        value={vehicleId}
+        onChange={setVehicleId}
+        options={vehicles.map((v) => ({ value: v.id, label: v.plate, sub: [v.make, v.model].filter(Boolean).join(' ') || v.driver_name || '' }))}
+        emptyHint="No vehicles are cached on this device. Sync first (Home → pull down), then create the request."
+      />
+      <SelectField
+        label="Fuel type *"
+        placeholder="Select fuel type"
+        value={fuelId}
+        onChange={setFuelId}
+        options={fuels.map((f) => ({ value: f.id, label: f.name, sub: f.code || '' }))}
+        emptyHint="No fuel types are cached on this device. Sync first (Home → pull down)."
+      />
       <Field label="Quantity (litres) *" error={qtyError}>
         <Input keyboardType="decimal-pad" value={quantity} onChangeText={setQuantity} placeholder="e.g. 40" returnKeyType="done" />
       </Field>

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { Screen, Card, Btn, Field, Input, Chip, KV, StatusBadge } from '../../src/components';
+import { Screen, Card, Btn, Field, Input, SelectField, KV, StatusBadge } from '../../src/components';
 import { cachedRequests, cachedPumps, cachedVehicles, cachedFuelTypes, enqueue, outboxCount, kvGet, opStillQueued } from '../../src/db';
 import { getSyncState, fullSync } from '../../src/sync';
 import { C, spacing as SP } from '../../theme';
@@ -167,19 +167,20 @@ export default function FuelingFlow() {
       </Step>
 
       <Step n={3} title="Select pump">
-        {pumps.length === 0
-          ? <Text style={{ color: C.muted, fontSize: 13 }}>No pumps cached — sync first (Home → pull down).</Text>
-          : (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm }}>
-              {pumps.map((p) => {
-                const bal = p.tank_id ? Number((tankStock.find((t) => t.id === p.tank_id) || {}).balance ?? null) : null;
-                const sub = p.tank_name ? (Number.isFinite(bal) ? `${p.tank_name} · ${fmtQty(bal)}` : p.tank_name) : undefined;
-                return <Chip key={p.id} label={p.name} sub={sub} active={pumpId === p.id} onPress={() => setPumpId(p.id)} />;
-              })}
-            </View>
-          )}
+        <SelectField
+          label="Pump"
+          placeholder="Select pump"
+          value={pumpId}
+          onChange={setPumpId}
+          options={pumps.map((p) => {
+            const bal = p.tank_id ? Number((tankStock.find((t) => t.id === p.tank_id) || {}).balance ?? null) : null;
+            const sub = p.tank_name ? (Number.isFinite(bal) ? `${p.tank_name} · ${fmtQty(bal)}` : p.tank_name) : undefined;
+            return { value: p.id, label: p.name, sub };
+          })}
+          emptyHint="No pumps are cached on this device. Sync first (Home → pull down)."
+        />
         {selectedPump && Number.isFinite(tankBalance) && (
-          <Text style={{ color: tankBalance <= 0 ? C.red : C.muted, fontSize: 12, marginTop: 6 }}>
+          <Text style={{ color: tankBalance <= 0 ? C.red : C.muted, fontSize: 12, marginTop: 2 }}>
             Tank stock: {fmtQty(tankBalance)}{tankBalance <= 0 ? ' — the server will REJECT issues until stock is received (Inventory → Bulk receipts)' : ''}
           </Text>
         )}

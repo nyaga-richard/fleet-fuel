@@ -61,11 +61,24 @@ export default function HomeScreen() {
         title={`Hello, ${(user?.name || 'there').split(' ')[0]}`}
         subtitle={isAttendant ? 'Attendant · ready to fuel' : `${(user?.role || '').replace(/^\w/, (c) => c.toUpperCase())} overview`}
         right={(
-          <TouchableOpacity onPress={() => router.push('/(tabs)/sync')} accessibilityLabel="Open sync status" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={{ color: pendingOps > 0 ? C.amber : C.muted, fontSize: 12, fontWeight: '600' }}>
-              {syncing ? '⟳ Syncing…' : pendingOps > 0 ? `⏳ ${pendingOps} queued` : '✓ Synced'}
-            </Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <TouchableOpacity onPress={() => router.push('/(tabs)/sync')} accessibilityLabel="Open sync status" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={{ color: pendingOps > 0 ? C.amber : C.muted, fontSize: 12, fontWeight: '600' }}>
+                {syncing ? '⟳ Syncing…' : pendingOps > 0 ? `⏳ ${pendingOps} queued` : '✓ Synced'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => router.push('/profile')}
+              accessibilityRole="button"
+              accessibilityLabel="Open profile"
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>
+                {String(user?.name || user?.email || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
       />
       <OfflineBanner lastSync={lastSync} />

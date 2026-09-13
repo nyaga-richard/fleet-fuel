@@ -3,7 +3,7 @@
 // Adjustments and receipts are manager/admin actions; anyone can view.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, SearchInput, Tabs, Notice, Stat, Field, DataTable, Skeleton, StatusPill, useForm } from '@/components/ui';
+import { Card, PageHeader, SearchInput, Tabs, Notice, Stat, Field, DataTable, Skeleton, StatusPill, useForm, SearchableSelect } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fmtQty, fmtDateTime } from '@/lib/format';
@@ -128,16 +128,12 @@ function Receipts({ canManage }) {
         <Card title="Record a bulk delivery (purchase)">
           <form onSubmit={submit} className="grid c3">
             <Field label="Fuel type *">
-              <select {...bind('fuel_type_id')} required>
-                <option value="">Select fuel…</option>
-                {refs.fuel_types.filter((f) => f.active).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </select>
+              <SearchableSelect {...bind('fuel_type_id')} required placeholder="Select fuel…"
+                options={refs.fuel_types.filter((f) => f.active).map((f) => ({ value: f.id, label: f.name, sub: f.code || '' }))} />
             </Field>
             <Field label="Into tank *">
-              <select {...bind('tank_id')} required>
-                <option value="">Select tank…</option>
-                {tanksForFuel.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
+              <SearchableSelect {...bind('tank_id')} required placeholder="Select tank…"
+                options={tanksForFuel.filter((t) => t.active).map((t) => ({ value: t.id, label: t.name, sub: t.capacity ? `${fmtQty(t.capacity)} capacity` : '' }))} />
             </Field>
             <Field label="Quantity (L) *"><input type="number" inputMode="decimal" step="0.01" min="0.01" {...bind('quantity')} required /></Field>
             <Field label="Supplier *"><input {...bind('supplier')} required placeholder="e.g. Vivo Energy" /></Field>
@@ -209,16 +205,12 @@ function Adjustments({ canManage }) {
           <div className="msg info">Use negative quantities for losses/shrinkage, positive for gains. Every adjustment is an immutable ledger entry with a mandatory reason.</div>
           <form onSubmit={submit} className="grid c3">
             <Field label="Fuel type *">
-              <select {...bind('fuel_type_id')} required>
-                <option value="">Select fuel…</option>
-                {refs.fuel_types.filter((f) => f.active).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </select>
+              <SearchableSelect {...bind('fuel_type_id')} required placeholder="Select fuel…"
+                options={refs.fuel_types.filter((f) => f.active).map((f) => ({ value: f.id, label: f.name, sub: f.code || '' }))} />
             </Field>
             <Field label="Tank *">
-              <select {...bind('tank_id')} required>
-                <option value="">Select tank…</option>
-                {tanksForFuel.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
+              <SearchableSelect {...bind('tank_id')} required placeholder="Select tank…"
+                options={tanksForFuel.filter((t) => t.active).map((t) => ({ value: t.id, label: t.name, sub: t.capacity ? `${fmtQty(t.capacity)} capacity` : '' }))} />
             </Field>
             <Field label="Signed quantity (L) *"><input type="number" step="0.01" {...bind('quantity')} required placeholder="-120 or 80" /></Field>
             <Field label="Reason *"><input {...bind('reason')} required placeholder="e.g. temperature shrinkage" /></Field>
@@ -273,17 +265,13 @@ function Readings() {
       <Card title="Record meter / dip readings">
         <form onSubmit={submit} className="grid c3">
           <Field label="Pump">
-            <select {...bind('pump_id')}>
-              <option value="">—</option>
-              {refs.pumps.filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            <SearchableSelect {...bind('pump_id')} placeholder="None"
+              options={[{ value: '', label: 'None' }, ...refs.pumps.filter((p) => p.active).map((p) => ({ value: p.id, label: p.name, sub: p.tank_name || '' }))]} />
           </Field>
           <Field label="Pump meter reading"><input type="number" inputMode="decimal" step="0.01" {...bind('reading')} /></Field>
           <Field label="Tank">
-            <select {...bind('tank_id')}>
-              <option value="">—</option>
-              {refs.tanks.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
+            <SearchableSelect {...bind('tank_id')} placeholder="None"
+              options={[{ value: '', label: 'None' }, ...refs.tanks.filter((t) => t.active).map((t) => ({ value: t.id, label: t.name, sub: t.fuel_type || '' }))]} />
           </Field>
           <Field label="Dip (cm)"><input type="number" inputMode="decimal" step="0.1" {...bind('dip')} /></Field>
           <Field label="Estimated quantity (L)"><input type="number" inputMode="decimal" step="0.01" {...bind('quantity_estimate')} /></Field>

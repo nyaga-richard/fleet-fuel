@@ -4,7 +4,7 @@
 // enforces the excess-approval workflow — the UI never bypasses it).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, SearchInput, Notice, useForm, Field, DataTable, StatusPill, Skeleton, ConfirmDialog, Select } from '@/components/ui';
+import { Card, PageHeader, SearchInput, Notice, useForm, Field, DataTable, StatusPill, Skeleton, ConfirmDialog, Select, SearchableSelect } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fmtQty, fmtDateTime } from '@/lib/format';
@@ -73,12 +73,6 @@ function Issue() {
   const selected = useMemo(() => (approved || []).find((r) => r.id === form.request_id), [approved, form.request_id]);
   const excess = selected && form.quantity !== '' && Number(form.quantity) > Number(selected.quantity);
 
-  function onPickRequest(e) {
-    const id = e.target.value;
-    const req = (approved || []).find((r) => r.id === id);
-    setForm((f) => ({ ...f, request_id: id, quantity: req ? String(req.quantity) : f.quantity }));
-  }
-
   async function issue(e) {
     e.preventDefault();
     if (busy) return;
@@ -132,20 +126,16 @@ function Issue() {
         ) : (
           <form onSubmit={issue} className="grid c3">
             <Field label="Approved request *">
-              <select value={form.request_id} onChange={onPickRequest} required>
-                <option value="">Select request…</option>
-                {approved.map((r) => (
-                  <option key={r.id} value={r.id}>{r.request_no} · {r.plate} · {fmtQty(r.quantity, '')} {r.fuel_type_name}</option>
-                ))}
-              </select>
+              <SearchableSelect value={form.request_id} required placeholder="Select request…"
+                onChange={(v) => {
+                  const req = approved.find((r) => r.id === v);
+                  setForm((f) => ({ ...f, request_id: v, quantity: req ? String(req.quantity) : f.quantity }));
+                }}
+                options={approved.map((r) => ({ value: r.id, label: `${r.request_no} · ${r.plate}`, sub: `${fmtQty(r.quantity, '')} ${r.fuel_type_name}` }))} />
             </Field>
             <Field label="Pump *">
-              <select {...bind('pump_id')} required>
-                <option value="">Select pump…</option>
-                {pumps.filter((p) => p.active).map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}{p.fuel_type_name ? ` · ${p.fuel_type_name}` : ''}</option>
-                ))}
-              </select>
+              <SearchableSelect {...bind('pump_id')} required placeholder="Select pump…"
+                options={pumps.filter((p) => p.active).map((p) => ({ value: p.id, label: p.name, sub: p.fuel_type_name || '' }))} />
             </Field>
             <Field
               label="Quantity (L) *"
@@ -189,10 +179,10 @@ function Issue() {
             <input type="date" value={fTo} onChange={(e) => { setFTo(e.target.value); loadTxns(fFrom, e.target.value, fVehicle).catch((er) => setError(er.message)); }} />
           </Field>
           <Field label="Vehicle">
-            <select value={fVehicle} onChange={(e) => { setFVehicle(e.target.value); loadTxns(fFrom, fTo, e.target.value).catch((er) => setError(er.message)); }}>
-              <option value="">All vehicles</option>
-              {vehicles.map((v) => <option key={v.id} value={v.id}>{v.plate}</option>)}
-            </select>
+            <SearchableSelect value={fVehicle}
+              onChange={(v) => { setFVehicle(v); loadTxns(fFrom, fTo, v).catch((er) => setError(er.message)); }}
+              placeholder="All vehicles"
+              options={vehicles.map((v) => ({ value: v.id, label: v.plate, sub: [v.make, v.model].filter(Boolean).join(' ') }))} />
           </Field>
         </div>
 

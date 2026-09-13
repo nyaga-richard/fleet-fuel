@@ -224,7 +224,7 @@ export function Chip({ label, active, onPress, sub }) {
   );
 }
 
-export function SearchBar({ value, onChange, placeholder = 'Search…' }) {
+export function SearchBar({ value, onChange, placeholder = 'Search…', autoFocus = false }) {
   return (
     <View style={styles.searchWrap}>
       <Text style={styles.searchIcon}>🔍</Text>
@@ -235,8 +235,10 @@ export function SearchBar({ value, onChange, placeholder = 'Search…' }) {
         placeholderTextColor={C.muted}
         returnKeyType="search"
         autoCorrect={false}
+        autoCapitalize="none"
         clearButtonMode="while-editing"
         accessibilityLabel={placeholder}
+        autoFocus={autoFocus}
         style={styles.searchInput}
       />
       {!!value && (
@@ -338,6 +340,79 @@ export function Sheet({ visible, onClose, title, children, footer, maxHeight = '
   );
 }
 
+// ── Searchable selector (spec §15–20) ────────────────────────────────────────
+// Closed: a 50px field showing the selection. Tap → bottom sheet with a
+// prominent auto-focused search and full-width 52px result rows (✓ on the
+// selected one). Case-insensitive partial search across title+sub. Honest
+// offline behaviour: an empty cached list shows the sync hint — never fake data.
+export function SelectField({ label, placeholder = 'Select…', value, onChange, options = [], emptyHint, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const selected = options.find((o) => o.value === value) || null;
+  const term = q.trim().toLowerCase();
+  const list = term
+    ? options.filter((o) =>
+        String(o.label || '').toLowerCase().includes(term)
+        || String(o.sub || '').toLowerCase().includes(term))
+    : options;
+
+  function pick(v) { setOpen(false); setQ(''); onChange(v); }
+
+  return (
+    <View style={{ marginBottom: FIELD_GAP }}>
+      {!!label && <Text style={[T.label, { marginBottom: 6 }]}>{label}</Text>}
+      <TouchableOpacity
+        onPress={() => !disabled && setOpen(true)}
+        disabled={disabled}
+        accessibilityRole="button"
+        accessibilityLabel={`${label || 'Select'}: ${selected?.label || placeholder}`}
+        style={[styles.selectField, disabled && { opacity: 0.5 }]}
+      >
+        <View style={{ flex: 1, minWidth: 0 }}>
+          {selected
+            ? <>
+                <Text style={T.body} numberOfLines={1}>{selected.label}</Text>
+                {!!selected.sub && <Text style={T.secondary} numberOfLines={1}>{selected.sub}</Text>}
+              </>
+            : <Text style={[T.body, { color: C.muted }]}>{placeholder}</Text>}
+        </View>
+        <Text style={{ color: C.muted, fontSize: 12 }}>▼</Text>
+      </TouchableOpacity>
+
+      <Sheet visible={open} onClose={() => { setOpen(false); setQ(''); }} title={label ? `Select ${String(label).replace(/\s*\*$/, '')}` : 'Select'}>
+        <SearchBar value={q} onChange={setQ} placeholder="Type to search…" autoFocus />
+        {options.length === 0 && (
+          <EmptyState icon="☁" title="Nothing available" message={emptyHint || 'No records are cached on this device yet. Sync first, then try again.'} />
+        )}
+        {options.length > 0 && list.length === 0 && (
+          <EmptyState icon="🔍" title={`No matches for “${q.trim()}”`} message="Try a different spelling or clear the search." />
+        )}
+        {list.map((o) => {
+          const on = o.value === value;
+          return (
+            <TouchableOpacity
+              key={String(o.value)}
+              onPress={() => pick(o.value)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}
+              style={[styles.selectRow, on && styles.selectRowOn]}
+            >
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[T.bodyStrong, on && { color: C.accent2 }]} numberOfLines={1}>{o.label}</Text>
+                {!!o.sub && <Text style={T.secondary} numberOfLines={1}>{o.sub}</Text>}
+              </View>
+              {on && <Text style={{ color: C.accent2, fontSize: 16, fontWeight: '800' }}>✓</Text>}
+            </TouchableOpacity>
+          );
+        })}
+        {!!value && (
+          <Btn label="Clear selection" variant="secondary" small onPress={() => pick('')} style={{ marginTop: SP.md }} />
+        )}
+      </Sheet>
+    </View>
+  );
+}
+
 // ── Confirm dialog ───────────────────────────────────────────────────────────
 export function Confirm({ visible, title, message, danger, busy, confirmLabel = 'Confirm', onConfirm, onCancel }) {
   return (
@@ -421,6 +496,17 @@ const styles = StyleSheet.create({
     paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.borderSoft, gap: SP.md,
   },
 
+  selectField: {
+    backgroundColor: C.bg, borderColor: C.border, borderWidth: 1, borderRadius: R.md,
+    paddingHorizontal: SCREEN_PAD - 2, minHeight: INPUT_H, flexDirection: 'row',
+    alignItems: 'center', gap: SP.sm,
+  },
+  selectRow: {
+    flexDirection: 'row', alignItems: 'center', gap: SP.md, minHeight: 52,
+    paddingHorizontal: SCREEN_PAD - 4, paddingVertical: SP.sm,
+    borderRadius: R.md, marginBottom: 2,
+  },
+  selectRowOn: { backgroundColor: C.accentSoft },
   sheetWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,.6)', justifyContent: 'flex-end' },
   sheetKav: { justifyContent: 'flex-end' },
   sheet: {
