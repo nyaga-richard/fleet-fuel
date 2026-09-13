@@ -66,7 +66,7 @@ export default function SyncScreen() {
           </View>
         </View>
         {state.message && !state.syncing && (
-          <Text style={{ color: state.ok ? C.green : C.amber, fontSize: 12, marginTop: SP.sm }}>{state.message}</Text>
+          <Text style={{ color: state.ok && !state.held ? C.green : C.amber, fontSize: 12, marginTop: SP.sm }}>{state.message}</Text>
         )}
         <Btn label={busy ? 'Syncing…' : 'SYNC NOW'} onPress={syncNow} busy={busy} style={{ marginTop: SP.md }} />
         {!net.isConnected && (
@@ -101,11 +101,11 @@ export default function SyncScreen() {
           <Card>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={{ color: C.text, fontSize: 13, fontWeight: '700' }}>{String(item.type).replace(/_/g, ' ')}</Text>
-              <StatusBadge status={item.retry_count >= 8 ? 'rejected' : item.retry_count > 0 ? 'pending' : 'issued'} />
+              <StatusBadge status={item.retry_count >= 100 ? 'rejected' : item.retry_count > 0 ? 'pending' : 'issued'} />
             </View>
             <Text style={[s.mono, { marginTop: 4 }]}>{fmtDateTime(item.created_at)}</Text>
             {!!item.last_error && <Text style={{ color: C.red, fontSize: 12, marginTop: 4 }}>{item.last_error}</Text>}
-            {item.retry_count > 0 && <Text style={{ color: C.amber, fontSize: 11.5, marginTop: 2 }}>retry {item.retry_count}/8</Text>}
+            {item.retry_count > 0 && <Text style={{ color: C.amber, fontSize: 11.5, marginTop: 2 }}>retry {item.retry_count}/100</Text>}
           </Card>
         )}
         ListEmptyComponent={(

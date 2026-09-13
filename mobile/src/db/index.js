@@ -114,9 +114,13 @@ export async function pendingOps(limit = 100) {
 }
 
 // Ops the push loop should still try (exhausted ones are parked, not deleted).
+// Cap is HIGH on purpose: a business rejection (e.g. "insufficient fuel in
+// tank") is often TEMPORARY — a bulk receipt recorded later makes the same op
+// valid. Fuel ops must keep retrying for days, not die after a few minutes.
+// Truly poisoned ops eventually park here and recover via Sync → Reset & retry.
 export async function opsNeedingPush(limit = 200) {
   return db.getAllAsync(
-    'SELECT * FROM outbox WHERE retry_count < 8 ORDER BY created_at ASC LIMIT ?', [limit],
+    'SELECT * FROM outbox WHERE retry_count < 100 ORDER BY created_at ASC LIMIT ?', [limit],
   );
 }
 

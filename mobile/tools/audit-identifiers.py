@@ -23,7 +23,7 @@ GLOBALS = {'require','module','exports','console','Promise','Math','Number','Str
 # Words that appear ONLY inside JSX prose sentences (never as code identifiers in
 # files where they're not already defined). If a file declares/imports the name,
 # it lands in `defined` from that — this list only masks prose-only occurrences.
-PROSE_ONLY = {'cause','automatically','received','change','CONFIGURED','request','first'}
+PROSE_ONLY = {'REJECTED','cause','automatically','received','change','CONFIGURED','request','first'}
 
 def strip_noncode(code):
     code = re.sub(r"(\w)'(\w)", r"\1’\2", code)              # You're → JSX-text apostrophe

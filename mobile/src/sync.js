@@ -48,8 +48,11 @@ export async function fullSync() {
       ok: true,
       pushed: pushSummary.pushed,
       failed: pushSummary.failed,
+      held: pushSummary.held || false,
       pulled: pullSummary,
-      message: `Synced — ${pushSummary.pushed} pushed, reference data refreshed`,
+      message: pushSummary.held
+        ? pushSummary.message
+        : `Synced — ${pushSummary.pushed} pushed${pushSummary.failed ? `, ${pushSummary.failed} REJECTED (see Sync tab)` : ''}, reference data refreshed`,
     };
   } catch (err) {
     lastResult = { ok: false, message: err.message };
