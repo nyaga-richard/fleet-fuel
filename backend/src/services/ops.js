@@ -163,7 +163,7 @@ export async function issueFuel(client, { payload, userId }) {
       `INSERT INTO pump_readings (pump_id, reading, fuel_transaction_id, recorded_by, client_uuid, created_at)
        VALUES ($1,$2,$3,$4,$5, COALESCE($6::timestamptz, now()))`,
       [pumpId, Number(payload.pump_reading), inserted[0].id, userId,
-        clientUuid ? clientUuid + ':reading' : null, payload.created_at ?? null],
+        clientUuid, payload.created_at ?? null],
     );
   }
 
@@ -308,7 +308,13 @@ export async function createAdjustment(client, { payload, userId }) {
 /** Record a pump meter or tank dip reading. */
 export async function createReading(client, { payload, userId }) {
   const type = payload.type === 'tank' ? 'tank' : 'pump';
-  const clientUuid = payload.client_uuid ? (type === 'pump' ? payload.client_uuid : payload.client_uuid + ':tank') : null;
+  // client_uuid columns are Postgres type `uuid` — the op_id must go in
+  // UNMODIFIED (the old ':tank' suffix made every tank-reading op crash with
+  // `invalid input syntax for type uuid`). Uniqueness is per table, so the
+  // same value as the parent op is safe and replay-idempotent.
+  const clientUuid = payload.client_uuid || null;
+  const existing = await findByClientUuid(client, type === 'pump' ? 'pump_readings' : 'tank_readings', clientUuid);
+  if (existing) return { row: existing, kind: type, duplicate: true };
   if (type === 'pump') {
     if (!payload.pump_id) throw new ApiError(400, 'pump_id is required');
     const value = Number(payload.reading);
