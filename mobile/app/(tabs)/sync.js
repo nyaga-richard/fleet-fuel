@@ -5,7 +5,7 @@ import {
   Screen, ScreenHeader, SectionHeader, Card, Btn, EmptyState, StatusBadge,
   useNetState, useTabBarPad,
 } from '../../src/components';
-import { pendingOps, outboxCount, deviceId, kvGet } from '../../src/db';
+import { pendingOps, outboxCount, deviceId, kvGet, resetRetries } from '../../src/db';
 import { fullSync, getSyncState, onSyncChange } from '../../src/sync';
 import { API_URL } from '../../src/api';
 import { C, spacing as SP } from '../../theme';
@@ -80,9 +80,9 @@ export default function SyncScreen() {
         <Card style={{ borderColor: C.red, borderWidth: 1 }}>
           <Text style={{ color: C.red, fontSize: 13, fontWeight: '700' }}>{failed} item(s) failed to synchronize</Text>
           <Text style={{ color: C.muted, fontSize: 12, marginVertical: 4 }}>
-            They are NEVER deleted automatically. Fix the cause (usually connectivity or a business rule) and retry.
+            They are NEVER deleted automatically. The exact server reason is shown on each item below. Fix the cause (often empty tank stock — record a bulk receipt on the web console) then reset & retry.
           </Text>
-          <Btn label="RETRY FAILED" variant="warn" onPress={syncNow} busy={busy} />
+          <Btn label="RESET & RETRY FAILED" variant="warn" busy={busy} onPress={async () => { setBusy(true); await resetRetries(); await fullSync(); await load(); setBusy(false); }} />
         </Card>
       )}
 
@@ -101,7 +101,7 @@ export default function SyncScreen() {
           <Card>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={{ color: C.text, fontSize: 13, fontWeight: '700' }}>{String(item.type).replace(/_/g, ' ')}</Text>
-              <StatusBadge status={item.retry_count > 0 ? 'rejected' : 'pending'} />
+              <StatusBadge status={item.retry_count >= 8 ? 'rejected' : item.retry_count > 0 ? 'pending' : 'issued'} />
             </View>
             <Text style={[s.mono, { marginTop: 4 }]}>{fmtDateTime(item.created_at)}</Text>
             {!!item.last_error && <Text style={{ color: C.red, fontSize: 12, marginTop: 4 }}>{item.last_error}</Text>}

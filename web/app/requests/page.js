@@ -3,7 +3,7 @@
 // Attendants can create and track requests; only admin/manager can approve.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, SearchInput, Tabs, Notice, useForm, Field, DataTable, Drawer, ConfirmDialog, StatusPill, Skeleton, EmptyState } from '@/components/ui';
+import { Card, PageHeader, SearchInput, Tabs, Notice, useForm, Field, DataTable, Drawer, ConfirmDialog, StatusPill, Skeleton, EmptyState, SearchableSelect } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fmtQty, fmtDateTime } from '@/lib/format';
@@ -138,16 +138,12 @@ function Requests() {
         <Card title="New fuel request">
           <form onSubmit={createRequest} className="grid c3">
             <Field label="Vehicle *">
-              <select {...bind('vehicle_id')} required>
-                <option value="">Select vehicle…</option>
-                {refs.vehicles.map((v) => <option key={v.id} value={v.id}>{v.plate} {v.make ? `· ${v.make} ${v.model || ''}` : ''}</option>)}
-              </select>
+              <SearchableSelect {...bind('vehicle_id')} required placeholder="Select vehicle…"
+                options={refs.vehicles.map((v) => ({ value: v.id, label: v.plate, sub: [v.make, v.model].filter(Boolean).join(' ') }))} />
             </Field>
             <Field label="Fuel type *">
-              <select {...bind('fuel_type_id')} required>
-                <option value="">Select fuel…</option>
-                {refs.fuel_types.filter((f) => f.active).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </select>
+              <SearchableSelect {...bind('fuel_type_id')} required placeholder="Select fuel…"
+                options={refs.fuel_types.filter((f) => f.active).map((f) => ({ value: f.id, label: f.name, sub: f.code || '' }))} />
             </Field>
             <Field label="Quantity (L) *" hint={`Authorized quantity is confirmed at approval`}>
               <input type="number" inputMode="decimal" step="0.01" min="0.01" {...bind('quantity')} required />

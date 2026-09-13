@@ -4,7 +4,7 @@
 // balances come from the database, so they stay correct under any filter.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, SearchInput, Notice, Field, DataTable, StatusPill, Skeleton, Stat } from '@/components/ui';
+import { Card, PageHeader, SearchInput, Notice, Field, DataTable, StatusPill, Skeleton, Stat, SearchableSelect } from '@/components/ui';
 import { api } from '@/lib/api';
 import { fmtQty, fmtDateTime } from '@/lib/format';
 
@@ -102,20 +102,18 @@ function Ledger() {
       <Card title="Ledger entries">
         <div className="grid c4" style={{ marginBottom: 12 }}>
           <Field label="Fuel type">
-            <select value={fuelTypeId} onChange={(e) => setFuelTypeId(e.target.value)}>
-              <option value="">All fuel types</option>
-              {refs.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-            </select>
+            <SearchableSelect value={fuelTypeId} onChange={setFuelTypeId} placeholder="All fuel types"
+              options={refs.map((f) => ({ value: f.id, label: f.name, sub: f.code || '' }))} />
           </Field>
           <Field label="Entry type">
-            <select value={entryType} onChange={(e) => setEntryType(e.target.value)}>
-              <option value="">All entries</option>
-              <option value="opening">Opening</option>
-              <option value="receipt">Receipt</option>
-              <option value="issue">Issue</option>
-              <option value="adjustment">Adjustment</option>
-              <option value="reversal">Reversal</option>
-            </select>
+            <SearchableSelect value={entryType} onChange={setEntryType} placeholder="All entries"
+              options={[
+                { value: 'opening', label: 'Opening' },
+                { value: 'receipt', label: 'Receipt' },
+                { value: 'issue', label: 'Issue' },
+                { value: 'adjustment', label: 'Adjustment' },
+                { value: 'reversal', label: 'Reversal' },
+              ]} />
           </Field>
           <Field label="From date">
             <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />

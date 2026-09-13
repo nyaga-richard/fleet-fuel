@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, Table, Notice, Tabs, useForm, Field } from '@/components/ui';
+import { Card, Table, Notice, Tabs, useForm, Field, SearchableSelect } from '@/components/ui';
 import { api } from '@/lib/api';
 import { fmtQty } from '@/lib/format';
 
@@ -191,10 +191,8 @@ function Tanks() {
           <form onSubmit={submit} className="grid c3" style={{ marginBottom: 16 }}>
             <Field label="Name *"><input {...bind('name')} required placeholder="Main Diesel Tank" /></Field>
             <Field label="Fuel type *">
-              <select {...bind('fuel_type_id')} required disabled={editing !== 'new'}>
-                <option value="">Select…</option>
-                {fuels.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </select>
+              <SearchableSelect {...bind('fuel_type_id')} required disabled={editing !== 'new'} placeholder="Select fuel…"
+                options={fuels.map((f) => ({ value: f.id, label: f.name, sub: f.code || '' }))} />
             </Field>
             <Field label="Capacity (L) *"><input type="number" step="0.01" min="1" {...bind('capacity')} required /></Field>
             <Field label="Location"><input {...bind('location')} /></Field>
@@ -297,10 +295,8 @@ function Pumps() {
           <form onSubmit={submit} className="grid c3" style={{ marginBottom: 16 }}>
             <Field label="Name *"><input {...bind('name')} required placeholder="Pump 1" /></Field>
             <Field label="Tank *">
-              <select {...bind('tank_id')} required>
-                <option value="">Select…</option>
-                {tanks.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
+              <SearchableSelect {...bind('tank_id')} required placeholder="Select tank…"
+                options={tanks.filter((t) => t.active).map((t) => ({ value: t.id, label: t.name, sub: t.fuel_type_name || t.location || '' }))} />
             </Field>
             <Field label="Serial"><input {...bind('serial')} /></Field>
             <div style={{ gridColumn: '1 / -1' }}>

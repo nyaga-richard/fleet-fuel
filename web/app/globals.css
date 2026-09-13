@@ -268,6 +268,46 @@ button.btn + button.btn { margin-left: 8px; }
 }
 .tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 
+/* ── Searchable select (combobox) ─────────────────────────────────────────── */
+.ss { position: relative; }
+.ss-native { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; min-height: 0; }
+.ss-control {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius-sm); padding: 8px 12px; font-size: 13.5px;
+  font-family: inherit; min-height: var(--tap); cursor: pointer; text-align: left;
+}
+.ss-control:hover { border-color: var(--accent); }
+.ss-control:disabled { opacity: .5; cursor: default; }
+.ss-value { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.ss-value b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-value small { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-clear {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; display: inline-flex;
+  align-items: center; justify-content: center; color: var(--muted); font-size: 15px;
+}
+.ss-clear:hover { background: var(--panel-2); color: var(--text); }
+.ss-caret { flex-shrink: 0; color: var(--muted); font-size: 11px; }
+.ss-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 70;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden;
+}
+.ss-search {
+  border: none !important; border-bottom: 1px solid var(--border) !important;
+  border-radius: 0 !important; min-height: 40px; flex-shrink: 0;
+}
+.ss-list { overflow-y: auto; max-height: 300px; padding: 4px; }
+.ss-opt {
+  display: flex; flex-direction: column; gap: 1px; justify-content: center;
+  min-height: 42px; padding: 7px 10px; border-radius: 6px; cursor: pointer;
+}
+.ss-opt.hi { background: var(--panel-2); }
+.ss-opt.sel .ss-opt-label { color: var(--accent-2); font-weight: 600; }
+.ss-opt-label { font-size: 13.5px; color: var(--text); }
+.ss-opt-sub { font-size: 11.5px; color: var(--muted); }
+.ss-empty { padding: 16px 12px; color: var(--muted); font-size: 12.5px; text-align: center; }
+
 /* ── Overlays: dialog · drawer ────────────────────────────────────────────── */
 .overlay {
   position: fixed; inset: 0; z-index: 80; background: rgba(4, 9, 18, .66);

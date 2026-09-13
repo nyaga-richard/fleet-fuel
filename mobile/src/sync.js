@@ -12,7 +12,7 @@
 import * as NetInfo from '@react-native-community/netinfo';
 import { api } from './api';
 import {
-  kvGet, kvSet, deviceId, pendingOps, removeOp, failOp, replaceReferenceData, wipeLocalData,
+  kvGet, kvSet, deviceId, opsNeedingPush, removeOp, failOp, replaceReferenceData, wipeLocalData,
 } from './db';
 
 let syncing = false;
@@ -62,7 +62,17 @@ export async function fullSync() {
 
 // ── PUSH: replay the outbox exactly once per op (server-side idempotency) ────
 async function pushQueue() {
-  const ops = await pendingOps(200);
+  // Safety: ops were created under a specific account. If a different
+  // account is now signed in, HOLD them (never push, never delete) — they
+  // sync when the original account signs back in. Survives session expiry.
+  const owner = await kvGet('outbox_owner');
+  const userRaw = await kvGet('user');
+  const uid = userRaw ? (() => { try { return JSON.parse(userRaw).id; } catch { return null; } })() : null;
+  if (owner && uid && owner !== uid) {
+    return { pushed: 0, failed: 0, held: true,
+      message: 'Pending operations were created under a different account — they are kept safely and will sync when that account signs in.' };
+  }
+  const ops = await opsNeedingPush(200);
   let pushed = 0;
   let failed = 0;
   if (ops.length > 0) {

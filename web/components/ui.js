@@ -280,6 +280,101 @@ export function Drawer({ open, onClose, title, subtitle, children, footer, width
   );
 }
 
+// Searchable select (spec §21–24): combobox with debounced-free local
+// filtering, full keyboard support (↑/↓ navigate, Enter select, Esc close),
+// ARIA roles, clear button, empty/selected states. Drop-in for native
+// selects: <SearchableSelect {...bind('x')} options={[{value,label,sub}]} />
+// (useForm.bind passes raw values, so no event adaptation is needed).
+export function SearchableSelect({ value, onChange, options = [], placeholder = 'Select…', disabled, required, id }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [hi, setHi] = useState(0);
+  const wrap = useRef(null);
+  const searchRef = useRef(null);
+  const selected = options.find((o) => o.value === value) || null;
+  const term = q.trim().toLowerCase();
+  const list = term
+    ? options.filter((o) =>
+        String(o.label || '').toLowerCase().includes(term)
+        || String(o.sub || '').toLowerCase().includes(term))
+    : options;
+
+  useEffect(() => {
+    function onDoc(e) { if (wrap.current && !wrap.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  useEffect(() => {
+    if (open) { setQ(''); setHi(0); setTimeout(() => searchRef.current?.focus(), 0); } // §24: type immediately
+  }, [open]);
+
+  function pick(v) { onChange(v); setOpen(false); setQ(''); }
+
+  function onKey(e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(h + 1, list.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (list[hi]) pick(list[hi].value); }
+    else if (e.key === 'Escape') { setOpen(false); }
+  }
+
+  return (
+    <div className="ss" ref={wrap}>
+      {required && (
+        <input className="ss-native" required value={value ?? ''} readOnly aria-hidden="true" tabIndex={-1} />
+      )}
+      <button
+        type="button" id={id} className="ss-control" disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox" aria-expanded={open} aria-label={selected ? selected.label : placeholder}
+      >
+        <span className="ss-value">
+          {selected ? (
+            <>
+              <b>{selected.label}</b>
+              {selected.sub && <small className="muted">{selected.sub}</small>}
+            </>
+          ) : <span className="muted">{placeholder}</span>}
+        </span>
+        {!!value && !disabled && (
+          <span
+            className="ss-clear" role="button" aria-label="Clear selection"
+            onClick={(e) => { e.stopPropagation(); onChange(''); }}
+          >×</span>
+        )}
+        <span className="ss-caret" aria-hidden="true">▾</span>
+      </button>
+
+      {open && (
+        <div className="ss-panel">
+          <input
+            ref={searchRef} className="ss-search" value={q}
+            onChange={(e) => { setQ(e.target.value); setHi(0); }}
+            onKeyDown={onKey}
+            placeholder="Type to search…"
+            aria-label="Search options"
+          />
+          <div className="ss-list" role="listbox" aria-label={placeholder}>
+            {options.length === 0 && <div className="ss-empty">No options available</div>}
+            {options.length > 0 && list.length === 0 && <div className="ss-empty">No matches for “{q.trim()}”</div>}
+            {list.map((o, i) => (
+              <div
+                key={o.value} role="option" aria-selected={o.value === value}
+                className={`ss-opt${i === hi ? ' hi' : ''}${o.value === value ? ' sel' : ''}`}
+                onMouseEnter={() => setHi(i)}
+                onClick={() => pick(o.value)}
+              >
+                <span className="ss-opt-label">{o.label}{o.value === value && ' ✓'}</span>
+                {o.sub && <span className="ss-opt-sub">{o.sub}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Controlled form helper: const {form, set, bind} = useForm({...})
 export function useForm(initial) {
   const [form, setForm] = useState(initial);

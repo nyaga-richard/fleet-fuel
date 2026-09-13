@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { Screen, Card, Btn, Field, Input, Chip, KV, StatusBadge } from '../../src/components';
-import { cachedRequests, cachedPumps, cachedVehicles, cachedFuelTypes, enqueue, outboxCount } from '../../src/db';
-import { getSyncState } from '../../src/sync';
+import { Screen, Card, Btn, Field, Input, SelectField, KV, StatusBadge } from '../../src/components';
+import { cachedRequests, cachedPumps, cachedVehicles, cachedFuelTypes, enqueue, outboxCount, kvGet, opStillQueued } from '../../src/db';
+import { getSyncState, fullSync } from '../../src/sync';
 import { C, spacing as SP } from '../../theme';
 import { fmtQty } from '../../src/fmt';
 
@@ -24,6 +24,7 @@ export default function FuelingFlow() {
   const [fuel, setFuel] = useState(null);
   const [pumps, setPumps] = useState([]);
   const [pumpId, setPumpId] = useState(null);
+  const [tankStock, setTankStock] = useState([]);
   const [odometer, setOdometer] = useState('');
   const [startMeter, setStartMeter] = useState('');
   const [quantity, setQuantity] = useState('');
@@ -40,6 +41,7 @@ export default function FuelingFlow() {
       setVehicle((await cachedVehicles()).find((v) => v.id === r.vehicle_id) || null);
       setFuel((await cachedFuelTypes()).find((f) => f.id === r.fuel_type_id) || null);
       setPumps(await cachedPumps());
+      setTankStock(JSON.parse((await kvGet('stock_tanks')) || '[]'));
       setQuantity((q) => q || String(r.quantity ?? ''));
     })();
   }, [id]));
@@ -51,6 +53,11 @@ export default function FuelingFlow() {
   const qtyInvalid = quantity !== '' && (!Number.isFinite(qty) || qty <= 0);
   const excess = Number.isFinite(qty) && qty > authorized && authorized > 0;
   const canComplete = !!req && !!pumpId && Number.isFinite(qty) && qty > 0 && !busy;
+  const selectedPump = pumps.find((p) => p.id === pumpId) || null;
+  const tankBalance = selectedPump?.tank_id
+    ? Number((tankStock.find((t) => t.id === selectedPump.tank_id) || {}).balance ?? null)
+    : null;
+  const lowStock = Number.isFinite(tankBalance) && Number.isFinite(qty) && qty > tankBalance;
 
   const suggestedEnd = useMemo(() => {
     const s = Number(startMeter);
@@ -62,17 +69,17 @@ export default function FuelingFlow() {
     if (busy || !req || !pumpId || !Number.isFinite(qty) || qty <= 0) return;
     setBusy(true);
     try {
-      await enqueue('fuel_transaction', {
-        request_no: req.request_no, // resolved server-side; works across devices
+      const opId = await enqueue('fuel_transaction', {
+        request_id: req.id,          // exact row — immune to stale request_no
+        request_no: req.request_no,  // human reference / cross-device fallback
         pump_id: pumpId,
         quantity: qty,
         pump_reading: endMeter !== '' ? Number(endMeter) : (startMeter !== '' ? Number(startMeter) + qty : null),
         odometer: odometer !== '' ? Number(odometer) : null,
         created_at: new Date().toISOString(),
       });
-      const pendingNow = await outboxCount();
       setDone({
-        synced: pendingNow <= queuedBefore,
+        synced: false,
         txn: {
           request_no: req.request_no,
           plate: req.plate || vehicle?.plate,
@@ -81,6 +88,10 @@ export default function FuelingFlow() {
           issued: qty,
           pump: (pumps.find((p) => p.id === pumpId) || {}).name,
         },
+      });
+      // Try an immediate sync in the background; flip the badge if it lands.
+      fullSync().then(async () => {
+        if (!(await opStillQueued(opId))) setDone((d) => (d ? { ...d, synced: true } : d));
       });
     } finally {
       setBusy(false);
@@ -156,13 +167,23 @@ export default function FuelingFlow() {
       </Step>
 
       <Step n={3} title="Select pump">
-        {pumps.length === 0
-          ? <Text style={{ color: C.muted, fontSize: 13 }}>No pumps cached — sync first (Home → pull down).</Text>
-          : (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm }}>
-              {pumps.map((p) => <Chip key={p.id} label={p.name} sub={p.tank_name} active={pumpId === p.id} onPress={() => setPumpId(p.id)} />)}
-            </View>
-          )}
+        <SelectField
+          label="Pump"
+          placeholder="Select pump"
+          value={pumpId}
+          onChange={setPumpId}
+          options={pumps.map((p) => {
+            const bal = p.tank_id ? Number((tankStock.find((t) => t.id === p.tank_id) || {}).balance ?? null) : null;
+            const sub = p.tank_name ? (Number.isFinite(bal) ? `${p.tank_name} · ${fmtQty(bal)}` : p.tank_name) : undefined;
+            return { value: p.id, label: p.name, sub };
+          })}
+          emptyHint="No pumps are cached on this device. Sync first (Home → pull down)."
+        />
+        {selectedPump && Number.isFinite(tankBalance) && (
+          <Text style={{ color: tankBalance <= 0 ? C.red : C.muted, fontSize: 12, marginTop: 2 }}>
+            Tank stock: {fmtQty(tankBalance)}{tankBalance <= 0 ? ' — the server will REJECT issues until stock is received (Inventory → Bulk receipts)' : ''}
+          </Text>
+        )}
       </Step>
 
       <Step n={4} title="Pump start meter">
@@ -192,6 +213,13 @@ export default function FuelingFlow() {
           <Card style={{ borderColor: C.amber, borderWidth: 1, marginBottom: 0 }}>
             <Text style={{ color: '#fcd34d', fontSize: 12.5 }}>
               ⚠ You entered {fmtQty(qty)} — that exceeds the authorized {fmtQty(authorized)}. The server will hold this transaction for manager approval.
+            </Text>
+          </Card>
+        )}
+        {lowStock && !excess && (
+          <Card style={{ borderColor: C.amber, borderWidth: 1, marginBottom: 0 }}>
+            <Text style={{ color: '#fcd34d', fontSize: 12.5 }}>
+              ⚠ Tank has only {fmtQty(tankBalance)} — issuing {fmtQty(qty)} will be rejected by the server until stock is received (Inventory → Bulk receipts on the web console).
             </Text>
           </Card>
         )}
