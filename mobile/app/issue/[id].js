@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Screen, Card, Btn, Field, Input, SelectField, KV, StatusBadge } from '../../src/components';
 import { cachedRequests, cachedPumps, cachedVehicles, cachedFuelTypes, enqueue, outboxCount, kvGet, opStillQueued } from '../../src/db';
-import { getSyncState, fullSync } from '../../src/sync';
+import { getSyncState, fullSync, refreshStock } from '../../src/sync';
 import { C, spacing as SP } from '../../theme';
 import { fmtQty } from '../../src/fmt';
 
@@ -42,6 +42,13 @@ export default function FuelingFlow() {
       setFuel((await cachedFuelTypes()).find((f) => f.id === r.fuel_type_id) || null);
       setPumps(await cachedPumps());
       setTankStock(JSON.parse((await kvGet('stock_tanks')) || '[]'));
+      // Online → pull fresh per-tank stock so a receipt made anywhere (web
+      // console or another device) is visible here immediately, not just after
+      // the next full sync. Offline → the cached values above stay (spec §23).
+      refreshStock()
+        .then(() => kvGet('stock_tanks'))
+        .then((raw) => setTankStock(JSON.parse(raw || '[]')))
+        .catch(() => {});
       setQuantity((q) => q || String(r.quantity ?? ''));
     })();
   }, [id]));
@@ -54,10 +61,11 @@ export default function FuelingFlow() {
   const excess = Number.isFinite(qty) && qty > authorized && authorized > 0;
   const canComplete = !!req && !!pumpId && Number.isFinite(qty) && qty > 0 && !busy;
   const selectedPump = pumps.find((p) => p.id === pumpId) || null;
-  const tankBalance = selectedPump?.tank_id
-    ? Number((tankStock.find((t) => t.id === selectedPump.tank_id) || {}).balance ?? null)
-    : null;
-  const lowStock = Number.isFinite(tankBalance) && Number.isFinite(qty) && qty > tankBalance;
+  // null = stock UNKNOWN (no row for this tank). Never coerce a missing row to
+  // 0 — Number(null) is 0, which used to fake a "Tank stock: 0 L" warning.
+  const tankRow = selectedPump?.tank_id ? tankStock.find((t) => t.id === selectedPump.tank_id) : null;
+  const tankBalance = tankRow ? Number(tankRow.balance) : null;
+  const lowStock = tankBalance !== null && Number.isFinite(qty) && qty > tankBalance;
 
   const suggestedEnd = useMemo(() => {
     const s = Number(startMeter);
@@ -173,15 +181,21 @@ export default function FuelingFlow() {
           value={pumpId}
           onChange={setPumpId}
           options={pumps.map((p) => {
-            const bal = p.tank_id ? Number((tankStock.find((t) => t.id === p.tank_id) || {}).balance ?? null) : null;
-            const sub = p.tank_name ? (Number.isFinite(bal) ? `${p.tank_name} · ${fmtQty(bal)}` : p.tank_name) : undefined;
+            const row = p.tank_id ? tankStock.find((t) => t.id === p.tank_id) : null;
+            const bal = row ? Number(row.balance) : null; // null = unknown, never fake 0
+            const sub = p.tank_name ? (bal !== null ? `${p.tank_name} · ${fmtQty(bal)}` : p.tank_name) : undefined;
             return { value: p.id, label: p.name, sub };
           })}
           emptyHint="No pumps are cached on this device. Sync first (Home → pull down)."
         />
-        {selectedPump && Number.isFinite(tankBalance) && (
+        {selectedPump && tankBalance !== null && (
           <Text style={{ color: tankBalance <= 0 ? C.red : C.muted, fontSize: 12, marginTop: 2 }}>
             Tank stock: {fmtQty(tankBalance)}{tankBalance <= 0 ? ' — the server will REJECT issues until stock is received (Inventory → Bulk receipts)' : ''}
+          </Text>
+        )}
+        {selectedPump && tankBalance === null && (
+          <Text style={{ color: C.muted, fontSize: 12, marginTop: 2 }}>
+            Tank stock: unknown for this pump's tank — not synced yet, or the tank is inactive. Pull down on Home to sync, or check the tank in Inventory.
           </Text>
         )}
       </Step>
