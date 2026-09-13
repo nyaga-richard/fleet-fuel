@@ -27,6 +27,20 @@ function uuid4() {
   });
 }
 
+// ── Startup gate ─────────────────────────────────────────────────────────────
+// On a FRESH install the tables don't exist until initDb's DDL completes.
+// Parallel callers (AppState resume probe, sync triggers, login notice,
+// screen focus effects) used to race it and crash with
+// "no such table: kv". Every exported helper now awaits this memoized
+// promise once; a failed init clears the gate so the next call retries.
+let readyPromise = null;
+export function dbReady() {
+  if (!readyPromise) {
+    readyPromise = initDb().catch((err) => { readyPromise = null; throw err; });
+  }
+  return readyPromise;
+}
+
 export async function initDb() {
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
@@ -75,19 +89,23 @@ export async function initDb() {
 
 // ── Key-value helpers (token, user, sync timestamps, device id) ─────────────
 export async function kvGet(key) {
+  await dbReady();
   const row = await db.getFirstAsync('SELECT value FROM kv WHERE key = ?', [key]);
   return row?.value ?? null;
 }
 
 export async function kvSet(key, value) {
+  await dbReady();
   await db.runAsync('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, String(value)]);
 }
 
 export async function kvRemove(key) {
+  await dbReady();
   await db.runAsync('DELETE FROM kv WHERE key = ?', [key]);
 }
 
 export async function deviceId() {
+  await dbReady();
   let id = await kvGet('device_id');
   if (!id) {
     const label = Constants?.deviceName || 'device';
@@ -99,6 +117,7 @@ export async function deviceId() {
 
 // ── Outbox (pending ops) ─────────────────────────────────────────────────────
 export async function enqueue(type, payload) {
+  await dbReady();
   const opId = uuid4();
   await db.runAsync(
     'INSERT INTO outbox (op_id, type, payload, created_at) VALUES (?, ?, ?, ?)',
@@ -108,6 +127,7 @@ export async function enqueue(type, payload) {
 }
 
 export async function pendingOps(limit = 100) {
+  await dbReady();
   return db.getAllAsync(
     'SELECT * FROM outbox ORDER BY created_at ASC LIMIT ?', [limit],
   );
@@ -119,6 +139,7 @@ export async function pendingOps(limit = 100) {
 // valid. Fuel ops must keep retrying for days, not die after a few minutes.
 // Truly poisoned ops eventually park here and recover via Sync → Reset & retry.
 export async function opsNeedingPush(limit = 200) {
+  await dbReady();
   return db.getAllAsync(
     'SELECT * FROM outbox WHERE retry_count < 100 ORDER BY created_at ASC LIMIT ?', [limit],
   );
@@ -126,24 +147,29 @@ export async function opsNeedingPush(limit = 200) {
 
 // Give parked (exhausted) ops another chance — operator action, never automatic.
 export async function resetRetries() {
+  await dbReady();
   await db.runAsync('UPDATE outbox SET retry_count = 0, last_error = NULL WHERE retry_count >= 8');
 }
 
 export async function opStillQueued(opId) {
+  await dbReady();
   const row = await db.getFirstAsync('SELECT 1 AS x FROM outbox WHERE op_id = ?', [opId]);
   return !!row;
 }
 
 export async function outboxCount() {
+  await dbReady();
   const row = await db.getFirstAsync('SELECT count(*) AS n FROM outbox');
   return row?.n ?? 0;
 }
 
 export async function removeOp(opId) {
+  await dbReady();
   await db.runAsync('DELETE FROM outbox WHERE op_id = ?', [opId]);
 }
 
 export async function failOp(opId, error) {
+  await dbReady();
   await db.runAsync(
     'UPDATE outbox SET retry_count = retry_count + 1, last_error = ? WHERE op_id = ?',
     [String(error).slice(0, 300), opId],
@@ -151,6 +177,7 @@ export async function failOp(opId, error) {
 }
 
 export async function wipeLocalData() {
+  await dbReady();
   await db.execAsync(
     `DELETE FROM outbox; DELETE FROM vehicles; DELETE FROM fuel_types;
      DELETE FROM tanks; DELETE FROM pumps; DELETE FROM requests; DELETE FROM transactions;
@@ -160,28 +187,35 @@ export async function wipeLocalData() {
 
 // ── Cached reference/operational reads (instant, offline) ────────────────────
 export async function cachedVehicles() {
+  await dbReady();
   return db.getAllAsync('SELECT * FROM vehicles WHERE active = 1 ORDER BY plate');
 }
 export async function cachedFuelTypes() {
+  await dbReady();
   return db.getAllAsync('SELECT * FROM fuel_types WHERE active = 1 ORDER BY name');
 }
 export async function cachedTanks() {
+  await dbReady();
   return db.getAllAsync('SELECT * FROM tanks WHERE active = 1 ORDER BY name');
 }
 export async function cachedPumps() {
+  await dbReady();
   return db.getAllAsync(
     'SELECT p.*, t.name AS tank_name FROM pumps p LEFT JOIN tanks t ON t.id = p.tank_id WHERE p.active = 1 ORDER BY p.name');
 }
 export async function cachedRequests(limit = 100) {
+  await dbReady();
   return db.getAllAsync(
     'SELECT * FROM requests ORDER BY created_at DESC LIMIT ?', [limit]);
 }
 export async function cachedTransactions(limit = 100) {
+  await dbReady();
   return db.getAllAsync(
     'SELECT * FROM transactions ORDER BY created_at DESC LIMIT ?', [limit]);
 }
 
 export async function replaceReferenceData(pull) {
+  await dbReady();
   const now = new Date().toISOString();
   await db.execAsync('BEGIN TRANSACTION');
   try {

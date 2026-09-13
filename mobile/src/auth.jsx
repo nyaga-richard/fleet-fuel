@@ -1,7 +1,7 @@
 // Auth context — token + user persisted in local SQLite (survives restarts).
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { api } from './api';
-import { kvGet, kvSet, initDb } from './db';
+import { kvGet, kvSet, dbReady } from './db';
 import { fullSync, logoutWipe } from './sync';
 
 const AuthContext = createContext(null);
@@ -12,7 +12,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     (async () => {
-      await initDb();
+      await dbReady();
       const token = await kvGet('token');
       const raw = await kvGet('user');
       if (token && raw) {
