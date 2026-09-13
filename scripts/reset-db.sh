@@ -48,9 +48,14 @@ BACKUP_DIR="$(env_value BACKUP_DIR /opt/fleet-fuel/backups)"
 
 # ── Mode detection ───────────────────────────────────────────────────────────
 MODE=native
-if have docker && docker info >/dev/null 2>&1 \
-   && compose ps postgres 2>/dev/null | grep -q running; then
-  MODE=docker
+if have docker && docker info >/dev/null 2>&1; then
+  # `compose ps` renders STATUS as "Up 3 hours (healthy)" — never the word
+  # "running" — so match the container name AND an Up state.
+  PS_OUT="$(compose ps postgres 2>/dev/null || true)"
+  if printf '%s' "$PS_OUT" | grep -q 'fleetfuel-postgres' \
+     && printf '%s' "$PS_OUT" | grep -q 'Up '; then
+    MODE=docker
+  fi
 fi
 
 # Native mode needs a connection string.
@@ -61,6 +66,15 @@ if [ "$MODE" = native ]; then
   : "${DATABASE_URL:?DATABASE_URL must be set (env file or environment)}"
   have psql     || die "psql not found — install postgresql-client"
   have pg_dump  || die "pg_dump not found — install postgresql-client"
+  # Preflight: fail BEFORE the backup/prompt if the host is unreachable.
+  # A docker-network hostname (e.g. @postgres:) can never resolve outside
+  # the docker network — that means this is the docker install and the
+  # postgres container wasn't detected (is it up? `docker ps`).
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tc 'SELECT 1;' >/dev/null 2>&1 \
+    || die "Native mode cannot reach the database ($(printf '%s' "$DATABASE_URL" | sed -E 's#(://[^:@/]+:)[^@]*@#\1***@#')).
+        If this server runs the docker stack: start it (scripts/deploy.sh or
+        'docker compose -p fleet-fuel up -d') and re-run this script —
+        docker mode is used automatically when the postgres container is Up."
 fi
 
 # psql channel: postgres container (docker) or local socket (native).
