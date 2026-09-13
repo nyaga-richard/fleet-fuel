@@ -1,0 +1,20 @@
+// Color system — dark operations theme. One source of truth.
+export const C = {
+  bg: '#0b1220',
+  bgSoft: '#101a2e',
+  panel: '#14203a',
+  panel2: '#1a2947',
+  border: '#24344f',
+  borderSoft: '#20304c',
+  text: '#e6ecf5',
+  muted: '#8fa0b8',
+  accent: '#3b82f6',
+  accent2: '#60a5fa',
+  accentSoft: '#1d3a6e',
+  green: '#22c55e',
+  amber: '#f59e0b',
+  red: '#ef4444',
+  dangerBg: 'rgba(239,68,68,.12)',
+  successBg: 'rgba(34,197,94,.12)',
+  warnBg: 'rgba(245,158,11,.12)',
+};

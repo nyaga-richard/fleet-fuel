@@ -1,24 +1,26 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Reusable mobile UI kit — SafeAreaScreen · ScreenHeader · SearchBar ·
-// StatusBadge · Btn · Input · Field · Chip · Card · Sheet · Confirm ·
-// EmptyState · OfflineBanner · KV · hooks (useNetState, useDebounced)
+// Reusable mobile UI kit — every screen is assembled from THESE components.
+// All values come from ../theme (spacing · typography · radius · shadows).
+// No arbitrary numbers in screens; no padding hacks; nothing fixed-height.
 //
-// Rules baked in here:
-//   • every interactive control ≥ 44pt tall (touch target, spec §13)
-//   • safe-area top edge handled once, in <Screen/>
-//   • keyboard-safe: <Screen keyboard scroll> wraps a KeyboardAvoidingView
-//     around a ScrollView with keyboardShouldPersistTaps (spec §9–11)
-//   • offline state is visible, never hidden (spec §27)
+//   Screen · ScreenHeader · SectionHeader · Card · StatCard · RequestCard ·
+//   TxnCard · StatusBadge · Btn · Input · Field · Chip · SearchBar ·
+//   FilterButton · EmptyState · OfflineBanner · KV · Sheet · Confirm ·
+//   useNetState · useDebounced · useTabBarPad
 // ─────────────────────────────────────────────────────────────────────────────
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView,
-  Platform, StyleSheet, Modal, ActivityIndicator,
+  Platform, StyleSheet, Modal, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as NetInfo from '@react-native-community/netinfo';
-import { C, S, R, TAP, STATUS_COLOR } from './theme';
-import { fmtRel } from './fmt';
+import {
+  C, spacing as SP, SCREEN_PAD, SCREEN_PAD_SM, SECTION_GAP, CARD_PAD, CARD_GAP,
+  FIELD_GAP, INPUT_H, BTN_H, BTN_H_LG, BTN_H_SM, SEARCH_H, TABBAR_CONTENT_H,
+  T, radius as R, shadowCard, shadowFloat, STATUS_COLOR,
+} from '../theme';
+import { fmtQty, fmtDateTime } from './fmt';
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
 export function useNetState() {
@@ -40,18 +42,26 @@ export function useDebounced(value, delay = 250) {
   return v;
 }
 
+// Bottom padding for scrollable content on tab screens: the REAL tab bar
+// height (content + safe-area inset) + breathing room. Never a blind 100.
+export function useTabBarPad(extra = SP.lg) {
+  const insets = useSafeAreaInsets();
+  return TABBAR_CONTENT_H + insets.bottom + extra;
+}
+
 // ── Screen scaffolding ───────────────────────────────────────────────────────
+// Structure (spec §3): SafeArea → padding → Header → Search/Filters → Content.
+// Horizontal padding is 16 (14 on very small devices) — computed, not random.
 export function Screen({ children, keyboard = false, scroll = false, pad = true, style }) {
-  let body = (
-    <View style={[styles.flex, pad && { padding: S.lg }, style]}>
-      {children}
-    </View>
-  );
+  const { width } = useWindowDimensions();
+  const padH = width < 350 ? SCREEN_PAD_SM : SCREEN_PAD;
+
+  let body = <View style={[styles.flex, pad && { paddingHorizontal: padH }, style]}>{children}</View>;
   if (scroll) {
     body = (
       <ScrollView
         style={styles.flex}
-        contentContainerStyle={[{ padding: S.lg, paddingBottom: S.xl + 20 }, style]}
+        contentContainerStyle={[pad && { paddingHorizontal: padH, paddingTop: SP.sm }, { paddingBottom: SP.xxl }, style]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -66,26 +76,26 @@ export function Screen({ children, keyboard = false, scroll = false, pad = true,
       </KeyboardAvoidingView>
     );
   }
-  return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
-      {body}
-    </SafeAreaView>
-  );
+  return <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>{body}</SafeAreaView>;
 }
 
 export function ScreenHeader({ title, subtitle, right }) {
   return (
     <View style={styles.header}>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-        {!!subtitle && <Text style={styles.headerSub} numberOfLines={1}>{subtitle}</Text>}
+        <Text style={T.title} numberOfLines={1}>{title}</Text>
+        {!!subtitle && <Text style={[T.subtitle, { marginTop: 2 }]} numberOfLines={1}>{subtitle}</Text>}
       </View>
       {right}
     </View>
   );
 }
 
-// ── Basic blocks ─────────────────────────────────────────────────────────────
+export function SectionHeader({ children, style }) {
+  return <Text style={[T.sectionTitle, { marginBottom: SP.sm, marginTop: SP.xs }, style]}>{children}</Text>;
+}
+
+// ── Surfaces ─────────────────────────────────────────────────────────────────
 export function Card({ children, onPress, style }) {
   const body = <View style={[styles.card, style]}>{children}</View>;
   if (!onPress) return body;
@@ -96,17 +106,78 @@ export function Card({ children, onPress, style }) {
   );
 }
 
+// Compact KPI tile (spec §7): content-sized, no min-height.
+export function StatCard({ label, value, tone = C.text, onPress, style }) {
+  const body = (
+    <View style={[styles.statCard, style]}>
+      <Text style={[T.metric, { color: tone }]}>{value}</Text>
+      <Text style={[T.sectionTitle, { marginTop: 2 }]} numberOfLines={2}>{label}</Text>
+    </View>
+  );
+  if (!onPress) return body;
+  return (
+    <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.85} onPress={onPress} accessibilityRole="button">
+      {body}
+    </TouchableOpacity>
+  );
+}
+
+// ── Domain cards ─────────────────────────────────────────────────────────────
+// Fuel request card (spec §6): scannable, grouped rows, whole card tappable.
+export function RequestCard({ request, onPress }) {
+  const r = request;
+  return (
+    <Card onPress={onPress}>
+      <View style={styles.rowBetween}>
+        <Text style={T.mono}>{r.request_no || '⏳ pending sync'}</Text>
+        <StatusBadge status={r.status} />
+      </View>
+      <Text style={[T.cardTitle, { fontSize: 16, marginTop: 6 }]} numberOfLines={1}>
+        {r.plate || 'vehicle'}
+        {!!r.driver_name && <Text style={T.secondary}> · {r.driver_name}</Text>}
+      </Text>
+      <View style={[styles.rowBetween, { marginTop: 6 }]}>
+        <Text style={T.secondary}>{r.fuel_type_name || 'Fuel'}{r.destination ? ` · ${r.destination}` : ''}</Text>
+        <Text style={[T.bodyStrong, { fontVariant: ['tabular-nums'] }]}>{fmtQty(r.quantity)}</Text>
+      </View>
+      <View style={[styles.rowBetween, { marginTop: SP.sm, paddingTop: SP.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.borderSoft }]}>
+        <Text style={T.secondary}>{fmtDateTime(r.created_at)}</Text>
+        <Text style={{ color: C.accent2, fontSize: 12.5, fontWeight: '600' }}>View details →</Text>
+      </View>
+    </Card>
+  );
+}
+
+// Fuel transaction card.
+export function TxnCard({ txn }) {
+  const t = txn;
+  return (
+    <Card>
+      <View style={styles.rowBetween}>
+        <Text style={T.mono}>{t.txn_no || 'FT-…'}</Text>
+        <StatusBadge status={t.status} />
+      </View>
+      <View style={[styles.rowBetween, { marginTop: 6 }]}>
+        <Text style={T.cardTitle} numberOfLines={1}>{t.plate || '—'}</Text>
+        <Text style={[T.bodyStrong, { fontVariant: ['tabular-nums'] }]}>{fmtQty(t.quantity)}</Text>
+      </View>
+      <Text style={[T.secondary, { marginTop: 4 }]}>{t.fuel_type_name || ''}{t.pump_name ? ` · ${t.pump_name}` : ''} · {fmtDateTime(t.created_at)}</Text>
+    </Card>
+  );
+}
+
+// ── Controls ─────────────────────────────────────────────────────────────────
 export function StatusBadge({ status }) {
   const color = STATUS_COLOR[status] || C.muted;
   return (
     <View style={[styles.badge, { borderColor: color }]}>
       <View style={[styles.badgeDot, { backgroundColor: color }]} />
-      <Text style={[styles.badgeText, { color }]}>{String(status || '—').replace(/_/g, ' ')}</Text>
+      <Text style={[T.badge, { color }]}>{String(status || '—').replace(/_/g, ' ')}</Text>
     </View>
   );
 }
 
-export function Btn({ label, onPress, variant = 'primary', busy, disabled, small, style }) {
+export function Btn({ label, onPress, variant = 'primary', busy, disabled, small, large, style }) {
   const bg = { primary: C.accent, secondary: C.panel2, success: C.green, danger: C.red, warn: C.amber }[variant] || C.accent;
   const off = disabled || busy;
   return (
@@ -116,29 +187,21 @@ export function Btn({ label, onPress, variant = 'primary', busy, disabled, small
       disabled={off}
       accessibilityRole="button"
       accessibilityState={{ disabled: off, busy }}
-      style={[styles.btn, { backgroundColor: bg, height: small ? 38 : TAP, opacity: off ? 0.5 : 1 }, style]}
+      style={[styles.btn, { backgroundColor: bg, height: small ? BTN_H_SM : large ? BTN_H_LG : BTN_H, opacity: off ? 0.5 : 1 }, style]}
     >
-      {busy
-        ? <ActivityIndicator color="#fff" size="small" />
-        : <Text style={[styles.btnText, small && { fontSize: 13 }]}>{label}</Text>}
+      {busy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.btnText}>{label}</Text>}
     </TouchableOpacity>
   );
 }
 
 export function Input(props) {
-  return (
-    <TextInput
-      placeholderTextColor={C.muted}
-      {...props}
-      style={[styles.input, props.style]}
-    />
-  );
+  return <TextInput placeholderTextColor={C.muted} {...props} style={[styles.input, props.style]} />;
 }
 
 export function Field({ label, hint, error, children }) {
   return (
-    <View style={{ marginBottom: S.md }}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+    <View style={{ marginBottom: FIELD_GAP }}>
+      {!!label && <Text style={[T.label, { marginBottom: 6 }]}>{label}</Text>}
       {children}
       {!!error && <Text style={styles.fieldError}>⚠ {error}</Text>}
       {!!hint && !error && <Text style={styles.fieldHint}>{hint}</Text>}
@@ -153,7 +216,7 @@ export function Chip({ label, active, onPress, sub }) {
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      style={[styles.chip, active && styles.chipOn, { minHeight: 40 }]}
+      style={[styles.chip, active && styles.chipOn]}
     >
       <Text style={[styles.chipText, active && { color: '#fff', fontWeight: '700' }]}>{label}</Text>
       {!!sub && <Text style={[styles.chipSub, active && { color: '#dbeafe' }]}>{sub}</Text>}
@@ -176,19 +239,34 @@ export function SearchBar({ value, onChange, placeholder = 'Search…' }) {
         accessibilityLabel={placeholder}
         style={styles.searchInput}
       />
-      {value ? (
-        <TouchableOpacity onPress={() => onChange('')} accessibilityLabel="Clear search" style={styles.searchClear}>
-          <Text style={{ color: C.muted, fontSize: 16 }}>✕</Text>
+      {!!value && (
+        <TouchableOpacity onPress={() => onChange('')} accessibilityLabel="Clear search" style={styles.searchClear} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Text style={{ color: C.muted, fontSize: 15 }}>✕</Text>
         </TouchableOpacity>
-      ) : null}
+      )}
     </View>
   );
 }
 
+export function FilterButton({ count, onPress }) {
+  const on = count > 0;
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Open filters"
+      style={[styles.filterBtn, on && styles.filterBtnOn]}
+    >
+      <Text style={[styles.filterBtnText, on && { color: '#fff' }]}>⚙ Filters{on ? ` · ${count}` : ''}</Text>
+    </TouchableOpacity>
+  );
+}
+
+// ── States ───────────────────────────────────────────────────────────────────
 export function EmptyState({ icon = '◌', title, message, action }) {
   return (
     <View style={styles.empty}>
-      <Text style={{ fontSize: 30, marginBottom: 8 }}>{icon}</Text>
+      <Text style={{ fontSize: 28, marginBottom: SP.sm }}>{icon}</Text>
       <Text style={styles.emptyTitle}>{title}</Text>
       {!!message && <Text style={styles.emptyMsg}>{message}</Text>}
       {action}
@@ -202,28 +280,36 @@ export function OfflineBanner({ lastSync }) {
   return (
     <View style={styles.offline}>
       <Text style={styles.offlineText}>
-        ● Offline — changes are saved on this device and will sync automatically{lastSync ? ` · last sync ${fmtRel(lastSync)}` : ''}
+        ● Offline — changes are saved on this device and will sync automatically{lastSync ? ` · last sync ${fmtRelShort(lastSync)}` : ''}
       </Text>
     </View>
   );
 }
 
-// Key/value rows — details screens.
+function fmtRelShort(s) {
+  const secs = Math.round((Date.now() - new Date(s).getTime()) / 1000);
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return `${Math.floor(secs / 60)} min ago`;
+  return `${Math.floor(secs / 3600)} h ago`;
+}
+
+// Key/value rows — grouped details (spec §15).
 export function KV({ rows }) {
   return (
     <View>
-      {rows.filter((r) => r && r.v !== undefined).map(([k, v], i) => (
+      {rows.filter((r) => r && r[1] !== undefined && r[1] !== null).map(([k, v], i) => (
         <View key={`${k}${i}`} style={styles.kvRow}>
-          <Text style={styles.kvKey}>{k}</Text>
-          <Text style={styles.kvVal}>{v === null || v === undefined || v === '' ? '—' : v}</Text>
+          <Text style={[T.secondary, { flexShrink: 1 }]}>{k}</Text>
+          <Text style={[T.body, { textAlign: 'right', flexShrink: 2, fontWeight: '600' }]}>{v === '' ? '—' : v}</Text>
         </View>
       ))}
     </View>
   );
 }
 
-// ── Bottom sheet (filters, forms) — keyboard-safe + scrollable ──────────────
+// ── Bottom sheet — safe-area aware, keyboard aware, scrollable (spec §22) ───
 export function Sheet({ visible, onClose, title, children, footer, maxHeight = '88%' }) {
+  const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.sheetWrap}>
@@ -232,15 +318,19 @@ export function Sheet({ visible, onClose, title, children, footer, maxHeight = '
           <View style={[styles.sheet, { maxHeight }]}>
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHead}>
-              <Text style={styles.sheetTitle}>{title}</Text>
+              <Text style={[T.cardTitle, { fontSize: 17 }]}>{title}</Text>
               <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                 <Text style={{ color: C.muted, fontSize: 16 }}>✕</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: S.lg, paddingBottom: S.xl }}>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, paddingTop: SP.md, paddingBottom: SP.xl }}>
               {children}
             </ScrollView>
-            {!!footer && <SafeAreaView edges={['bottom']} style={styles.sheetFoot}><View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: S.lg, paddingVertical: S.md }}>{footer}</View></SafeAreaView>}
+            {!!footer && (
+              <View style={[styles.sheetFoot, { paddingBottom: insets.bottom + SP.md }]}>
+                {footer}
+              </View>
+            )}
           </View>
         </KeyboardAvoidingView>
       </View>
@@ -254,15 +344,11 @@ export function Confirm({ visible, title, message, danger, busy, confirmLabel = 
     <Modal visible={visible} transparent animationType="fade" onRequestClose={busy ? undefined : onCancel}>
       <View style={styles.confirmWrap}>
         <View style={styles.confirmCard}>
-          <Text style={styles.confirmTitle}>{title}</Text>
-          {!!message && <Text style={styles.confirmMsg}>{message}</Text>}
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: S.lg }}>
-            <View style={{ flex: 1 }}>
-              <Btn label="Cancel" variant="secondary" onPress={onCancel} disabled={busy} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Btn label={busy ? 'Working…' : confirmLabel} variant={danger ? 'danger' : 'primary'} busy={busy} onPress={onConfirm} />
-            </View>
+          <Text style={[T.cardTitle, { fontSize: 16, marginBottom: 6 }]}>{title}</Text>
+          {!!message && <Text style={T.secondary}>{message}</Text>}
+          <View style={{ flexDirection: 'row', gap: SP.md, marginTop: SECTION_GAP - 6 }}>
+            <View style={{ flex: 1 }}><Btn label="Cancel" variant="secondary" onPress={onCancel} disabled={busy} /></View>
+            <View style={{ flex: 1 }}><Btn label={busy ? 'Working…' : confirmLabel} variant={danger ? 'danger' : 'primary'} busy={busy} onPress={onConfirm} /></View>
           </View>
         </View>
       </View>
@@ -270,71 +356,81 @@ export function Confirm({ visible, title, message, danger, busy, confirmLabel = 
   );
 }
 
-// ── Styles ───────────────────────────────────────────────────────────────────
+// ── Styles — composed ONLY from theme tokens ─────────────────────────────────
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: C.bg },
-  header: { flexDirection: 'row', alignItems: 'center', gap: S.md, marginBottom: S.lg },
-  headerTitle: { color: C.text, fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
-  headerSub: { color: C.muted, fontSize: 13, marginTop: 3 },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SP.md },
+  header: { flexDirection: 'row', alignItems: 'center', gap: SP.md, paddingTop: SP.sm, paddingBottom: SP.md },
+
   card: {
-    backgroundColor: C.panel, borderColor: '#2a3c5e', borderWidth: 1,
-    borderRadius: 16, padding: 18, marginBottom: 12,
-    shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 }, elevation: 4,
+    backgroundColor: C.panel, borderColor: C.borderSoft, borderWidth: 1,
+    borderRadius: R.lg, padding: CARD_PAD, marginBottom: CARD_GAP, ...shadowCard,
   },
+  statCard: {
+    backgroundColor: C.panel, borderColor: C.borderSoft, borderWidth: 1,
+    borderLeftWidth: 3, borderLeftColor: C.accent,
+    borderRadius: R.lg, padding: CARD_PAD - 2, ...shadowCard,
+  },
+
   badge: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: R.pill, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start' },
-  badgeDot: { width: 7, height: 7, borderRadius: 4 },
-  badgeText: { fontSize: 10.5, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
-  btn: { borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 15, letterSpacing: 0.3 },
+  badgeDot: { width: 6, height: 6, borderRadius: 3 },
+
+  btn: { borderRadius: R.md, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SP.lg },
+  btnText: { color: '#fff', fontWeight: '700', fontSize: 15, letterSpacing: 0.2 },
+
   input: {
-    backgroundColor: C.bg, borderColor: C.border, borderWidth: 1, borderRadius: 12,
-    color: C.text, paddingHorizontal: 14, minHeight: 50, fontSize: 15.5,
+    backgroundColor: C.bg, borderColor: C.border, borderWidth: 1, borderRadius: R.md,
+    color: C.text, paddingHorizontal: SCREEN_PAD - 2, minHeight: INPUT_H, fontSize: 15,
   },
-  fieldLabel: { color: C.muted, fontSize: 12, marginBottom: 6, fontWeight: '600' },
-  fieldHint: { color: C.muted, fontSize: 11.5, marginTop: 4 },
-  fieldError: { color: C.red, fontSize: 12, marginTop: 4 },
+  fieldError: { color: C.red, fontSize: T.badge.fontSize + 1.5, marginTop: 6, fontWeight: '600' },
+  fieldHint: { color: C.muted, fontSize: 11.5, marginTop: 6 },
+
   chip: {
-    borderColor: C.border, borderWidth: 1, borderRadius: R.pill, paddingHorizontal: 14,
-    paddingVertical: 9, backgroundColor: C.bg, justifyContent: 'center',
+    borderColor: C.border, borderWidth: 1, borderRadius: R.xl, paddingHorizontal: 14,
+    minHeight: 40, backgroundColor: C.bg, justifyContent: 'center',
   },
-  chipOn: { borderColor: C.accent, backgroundColor: '#1d3a6e' },
+  chipOn: { borderColor: C.accent, backgroundColor: C.accentSoft },
   chipText: { color: C.text, fontSize: 13 },
   chipSub: { color: C.muted, fontSize: 10.5 },
+
   searchWrap: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: C.panel,
-    borderColor: C.border, borderWidth: 1, borderRadius: R.pill, paddingHorizontal: 12,
-    minHeight: 48, marginBottom: S.md,
+    borderColor: C.border, borderWidth: 1, borderRadius: R.md, paddingHorizontal: 14,
+    height: SEARCH_H, marginBottom: SP.md,
   },
-  searchIcon: { fontSize: 13, marginRight: 8 },
-  searchInput: { flex: 1, color: C.text, fontSize: 15, paddingVertical: 10 },
-  searchClear: { padding: 8 },
-  empty: { alignItems: 'center', paddingVertical: 48, paddingHorizontal: S.xl },
+  searchIcon: { fontSize: 13, marginRight: SP.sm },
+  searchInput: { flex: 1, color: C.text, fontSize: 15, paddingVertical: 0 },
+  searchClear: { padding: SP.sm },
+
+  filterBtn: {
+    borderColor: C.border, borderWidth: 1, borderRadius: R.xl, paddingHorizontal: 14,
+    minHeight: 40, justifyContent: 'center', backgroundColor: C.bg,
+  },
+  filterBtnOn: { borderColor: C.accent, backgroundColor: C.accentSoft },
+  filterBtnText: { color: C.text, fontSize: 13, fontWeight: '600' },
+
+  empty: { alignItems: 'center', paddingVertical: 44, paddingHorizontal: SP.xxl },
   emptyTitle: { color: C.text, fontSize: 16, fontWeight: '700', marginBottom: 6, textAlign: 'center' },
-  emptyMsg: { color: C.muted, fontSize: 13, textAlign: 'center', marginBottom: S.lg },
-  offline: {
-    backgroundColor: C.warnBg, borderColor: C.amber, borderWidth: 1, borderRadius: R.sm,
-    padding: 10, marginBottom: S.md,
-  },
+  emptyMsg: { color: C.muted, fontSize: 13, textAlign: 'center', marginBottom: SP.lg },
+
+  offline: { backgroundColor: C.warnBg, borderColor: C.amber, borderWidth: 1, borderRadius: R.md, padding: 10, marginBottom: SP.md },
   offlineText: { color: '#fcd34d', fontSize: 12 },
+
   kvRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
-    paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border, gap: S.md,
+    paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.borderSoft, gap: SP.md,
   },
-  kvKey: { color: C.muted, fontSize: 13, flexShrink: 1 },
-  kvVal: { color: C.text, fontSize: 13, fontWeight: '600', textAlign: 'right', flexShrink: 2 },
+
   sheetWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,.6)', justifyContent: 'flex-end' },
   sheetKav: { justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: C.panel, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    borderTopWidth: 1, borderColor: C.border, height: 'auto',
+    backgroundColor: C.panel, borderTopLeftRadius: R.xl, borderTopRightRadius: R.xl,
+    borderTopWidth: 1, borderColor: C.border, height: 'auto', ...shadowFloat,
   },
-  sheetHandle: { alignSelf: 'center', width: 46, height: 5, borderRadius: 3, backgroundColor: C.border, marginTop: 10 },
-  sheetHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: S.lg, paddingTop: S.md },
-  sheetTitle: { color: C.text, fontSize: 18, fontWeight: '800' },
-  sheetFoot: { backgroundColor: C.panel, borderTopWidth: 1, borderTopColor: C.border },
-  confirmWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,.66)', alignItems: 'center', justifyContent: 'center', padding: S.xl },
-  confirmCard: { backgroundColor: C.panel, borderColor: C.border, borderWidth: 1, borderRadius: 18, padding: S.xl, width: '100%', maxWidth: 400 },
-  confirmTitle: { color: C.text, fontSize: 16, fontWeight: '800', marginBottom: 6 },
-  confirmMsg: { color: C.muted, fontSize: 13 },
+  sheetHandle: { alignSelf: 'center', width: 44, height: 5, borderRadius: 3, backgroundColor: C.border, marginTop: SP.sm },
+  sheetHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SCREEN_PAD, paddingTop: SP.md, paddingBottom: SP.sm },
+  sheetFoot: { borderTopWidth: 1, borderTopColor: C.border, paddingTop: SP.md, flexDirection: 'row', gap: SP.md, paddingHorizontal: SCREEN_PAD },
+
+  confirmWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,.66)', alignItems: 'center', justifyContent: 'center', padding: SP.xxl },
+  confirmCard: { backgroundColor: C.panel, borderColor: C.border, borderWidth: 1, borderRadius: R.lg, padding: SP.xxl, width: '100%', maxWidth: 400, ...shadowFloat },
 });

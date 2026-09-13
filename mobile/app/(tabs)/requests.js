@@ -3,37 +3,34 @@ import { View, Text, FlatList, TouchableOpacity } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuth } from '../../src/auth';
 import {
-  Screen, ScreenHeader, Card, StatusBadge, Btn, Field, Input, Chip, SearchBar,
-  EmptyState, OfflineBanner, Sheet, useDebounced,
+  Screen, ScreenHeader, SectionHeader, StatusBadge, Btn, Field, Input, Chip,
+  SearchBar, FilterButton, EmptyState, OfflineBanner, Sheet, RequestCard,
+  useDebounced, useTabBarPad,
 } from '../../src/components';
 import {
-  cachedRequests, cachedVehicles, cachedFuelTypes, enqueue, outboxCount,
+  cachedRequests, cachedVehicles, cachedFuelTypes, enqueue, outboxCount, kvGet,
 } from '../../src/db';
 import { fullSync } from '../../src/sync';
-import { kvGet } from '../../src/db';
-import { C } from '../../src/theme';
-import { fmtQty, fmtDateTime } from '../../src/fmt';
+import { C, spacing as SP } from '../../theme';
+import { fmtDateTime } from '../../src/fmt';
 
-const FILTERS = [
-  { value: 'all', label: 'All' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'issued', label: 'Issued' },
-  { value: 'rejected', label: 'Rejected' },
-  { value: 'cancelled', label: 'Cancelled' },
-];
+const STATUS_FILTERS = ['all', 'pending', 'approved', 'issued', 'rejected', 'cancelled'];
+const DEFAULT_FILTERS = { status: 'all', fuel_type_id: '', vehicle_id: '', from: '', to: '' };
 
-// Fuel Requests — search / filter → tap a card → full details → act.
+// Fuel Requests (spec §14): Search → [Filters] → list → TAP → details.
 // Creating works fully OFFLINE (queued in SQLite, synced exactly once).
 export default function RequestsScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const [rows, setRows] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [fuels, setFuels] = useState([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [lastSync, setLastSync] = useState(null);
   const [q, setQ] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [sheet, setSheet] = useState(false);
+  const [createSheet, setCreateSheet] = useState(false);
   const dq = useDebounced(q, 250);
 
   const load = useCallback(async () => {
@@ -48,13 +45,17 @@ export default function RequestsScreen() {
     const term = dq.trim().toLowerCase();
     const m = (s) => String(s ?? '').toLowerCase().includes(term);
     return rows
-      .filter((r) => statusFilter === 'all' || r.status === statusFilter)
-      .filter((r) => !term
-        || m(r.request_no) || m(r.plate) || m(r.driver_name)
-        || m(r.status) || m(r.fuel_type_id) || m(r.destination))
+      .filter((r) => filters.status === 'all' || r.status === filters.status)
+      .filter((r) => !filters.fuel_type_id || r.fuel_type_id === filters.fuel_type_id)
+      .filter((r) => !filters.vehicle_id || r.vehicle_id === filters.vehicle_id)
+      .filter((r) => !filters.from || String(r.created_at || '').slice(0, 10) >= filters.from)
+      .filter((r) => !filters.to || String(r.created_at || '').slice(0, 10) <= filters.to)
+      .filter((r) => !term || m(r.request_no) || m(r.plate) || m(r.driver_name) || m(r.status) || m(r.destination))
       .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-  }, [rows, dq, statusFilter]);
+  }, [rows, dq, filters]);
 
+  const filterCount = ['fuel_type_id', 'vehicle_id', 'from', 'to'].filter((k) => filters[k]).length
+    + (filters.status !== 'all' ? 1 : 0);
 
   return (
     <Screen>
@@ -63,10 +64,10 @@ export default function RequestsScreen() {
         subtitle={pendingCount > 0 ? `${pendingCount} offline change(s) queued` : 'Tap a request for details'}
         right={(
           <TouchableOpacity
-            onPress={() => setSheet(true)}
+            onPress={() => setCreateSheet(true)}
             accessibilityRole="button"
             accessibilityLabel="New fuel request"
-            style={{ backgroundColor: C.accent, borderRadius: 22, paddingHorizontal: 14, minHeight: 40, justifyContent: 'center' }}
+            style={{ backgroundColor: C.accent, borderRadius: 20, paddingHorizontal: 14, minHeight: 40, justifyContent: 'center' }}
           >
             <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>＋ New</Text>
           </TouchableOpacity>
@@ -76,56 +77,62 @@ export default function RequestsScreen() {
 
       <SearchBar value={q} onChange={setQ} placeholder="Search requests, plates, drivers…" />
 
-      <FlatList
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={{ marginBottom: 12 }}
-        data={FILTERS}
-        keyExtractor={(f) => f.value}
-        renderItem={({ item }) => (
-          <Chip label={item.label} active={statusFilter === item.value} onPress={() => setStatusFilter(item.value)} />
-        )}
-      />
+      <View style={{ flexDirection: 'row', gap: SP.sm, marginBottom: SP.md, alignItems: 'center' }}>
+        <FilterButton count={filterCount} onPress={() => setSheet(true)} />
+        <FlatList
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          data={STATUS_FILTERS}
+          keyExtractor={(f) => f}
+          renderItem={({ item }) => (
+            <View style={{ marginRight: SP.sm }}>
+              <Chip
+                label={item === 'all' ? 'All' : item}
+                active={filters.status === item}
+                onPress={() => setFilters((f) => ({ ...f, status: item }))}
+              />
+            </View>
+          )}
+        />
+      </View>
 
       <FlatList
         data={filtered}
         keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => (
-          <Card onPress={() => router.push(`/request/${item.id}`)}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={{ color: C.muted, fontSize: 12, fontWeight: '700', letterSpacing: 0.4 }}>
-                {item.request_no || '⏳ pending sync'}
-              </Text>
-              <StatusBadge status={item.status} />
-            </View>
-            <Text style={{ color: C.text, fontSize: 15.5, fontWeight: '700', marginVertical: 4 }}>
-              {item.plate || 'vehicle'} · {fmtQty(item.quantity)}
-            </Text>
-            <Text style={{ color: C.muted, fontSize: 12 }}>
-              {item.driver_name || '—'} · {fmtDateTime(item.created_at)}
-            </Text>
-          </Card>
-        )}
+        renderItem={({ item }) => <RequestCard request={item} onPress={() => router.push(`/request/${item.id}`)} />}
         ListEmptyComponent={(
           <EmptyState
             icon="🔍"
-            title={dq || statusFilter !== 'all' ? 'No matching requests' : 'No requests yet'}
-            message={dq || statusFilter !== 'all'
-              ? 'Try another registration, request number or clear the filters.'
+            title={dq || filterCount ? 'No matching requests' : 'No requests yet'}
+            message={dq || filterCount
+              ? 'Try another registration, request number, or clear the filters.'
               : 'Pull down on Home to sync, or create the first request.'}
-            action={(dq || statusFilter !== 'all')
-              ? <Btn label="Clear search & filters" variant="secondary" onPress={() => { setQ(''); setStatusFilter('all'); }} />
-              : <Btn label="＋ New fuel request" onPress={() => setSheet(true)} />}
+            action={(dq || filterCount)
+              ? <Btn label="Clear search & filters" variant="secondary" onPress={() => { setQ(''); setFilters(DEFAULT_FILTERS); }} />
+              : <Btn label="＋ New fuel request" onPress={() => setCreateSheet(true)} />}
           />
         )}
-        contentContainerStyle={{ paddingBottom: 30 }}
+        contentContainerStyle={{ paddingBottom: useTabBarPad() }}
         initialNumToRender={10}
         maxToRenderPerBatch={10}
       />
 
-      <NewRequestSheet
+      <FilterSheet
         visible={sheet}
         onClose={() => setSheet(false)}
+        filters={filters}
+        setFilters={setFilters}
+        vehicles={vehicles}
+        fuels={fuels}
+        onLoadRefs={async () => {
+          setVehicles(await cachedVehicles());
+          setFuels(await cachedFuelTypes());
+        }}
+      />
+
+      <NewRequestSheet
+        visible={createSheet}
+        onClose={() => setCreateSheet(false)}
         onSaved={() => { load(); fullSync().catch(() => {}); }}
         user={user}
       />
@@ -133,7 +140,82 @@ export default function RequestsScreen() {
   );
 }
 
-// ── New request — bottom sheet, keyboard-safe, works offline ────────────────
+// ── Filter bottom sheet (spec §13) ──────────────────────────────────────────
+function FilterSheet({ visible, onClose, filters, setFilters, vehicles, fuels, onLoadRefs }) {
+  const [draft, setDraft] = useState(filters);
+
+  useEffect(() => {
+    if (visible) {
+      setDraft(filters);
+      onLoadRefs?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  const dateBad = (v) => v !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(v);
+
+  return (
+    <Sheet
+      visible={visible}
+      onClose={onClose}
+      title="Filters"
+      footer={(
+        <>
+          <View style={{ flex: 1 }}>
+            <Btn label="Clear" variant="secondary" onPress={() => setDraft({ ...DEFAULT_FILTERS, status: 'all' })} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Btn label="Apply" onPress={() => { setFilters(draft); onClose(); }} />
+          </View>
+        </>
+      )}
+    >
+      <Field label="Status">
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm }}>
+          {STATUS_FILTERS.map((s) => (
+            <Chip key={s} label={s === 'all' ? 'All' : s} active={draft.status === s} onPress={() => setDraft((d) => ({ ...d, status: s }))} />
+          ))}
+        </View>
+      </Field>
+      <Field label="Fuel type">
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm }}>
+          {fuels.map((f) => (
+            <Chip key={f.id} label={f.name} active={draft.fuel_type_id === f.id} onPress={() => setDraft((d) => ({ ...d, fuel_type_id: d.fuel_type_id === f.id ? '' : f.id }))} />
+          ))}
+          {fuels.length === 0 && <Text style={{ color: C.muted, fontSize: 13 }}>No fuel types cached — sync first.</Text>}
+        </View>
+      </Field>
+      <Field label="Vehicle">
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm }}>
+          {vehicles.map((v) => (
+            <Chip key={v.id} label={v.plate} active={draft.vehicle_id === v.id} onPress={() => setDraft((d) => ({ ...d, vehicle_id: d.vehicle_id === v.id ? '' : v.id }))} />
+          ))}
+          {vehicles.length === 0 && <Text style={{ color: C.muted, fontSize: 13 }}>No vehicles cached — sync first.</Text>}
+        </View>
+      </Field>
+      <Field label="Date from" hint="YYYY-MM-DD">
+        <Input
+          keyboardType="numbers-and-punctuation"
+          value={draft.from}
+          onChangeText={(v) => setDraft((d) => ({ ...d, from: v }))}
+          placeholder="YYYY-MM-DD"
+          autoCapitalize="none"
+        />
+      </Field>
+      <Field label="Date to" hint={dateBad(draft.to) || dateBad(draft.from) ? 'Use the YYYY-MM-DD format' : null} error={dateBad(draft.to) ? 'Invalid date' : null}>
+        <Input
+          keyboardType="numbers-and-punctuation"
+          value={draft.to}
+          onChangeText={(v) => setDraft((d) => ({ ...d, to: v }))}
+          placeholder="YYYY-MM-DD"
+          autoCapitalize="none"
+        />
+      </Field>
+    </Sheet>
+  );
+}
+
+// ── New request — keyboard-safe bottom sheet, works offline ─────────────────
 function NewRequestSheet({ visible, onClose, onSaved, user }) {
   const [vehicles, setVehicles] = useState([]);
   const [fuels, setFuels] = useState([]);
@@ -159,7 +241,6 @@ function NewRequestSheet({ visible, onClose, onSaved, user }) {
     if (!vehicleId || !fuelId || !qty || qty <= 0) return;
     setBusy(true);
     try {
-      // 1. Queue locally first — works fully offline, survives restarts.
       await enqueue('fuel_request', {
         vehicle_id: vehicleId,
         fuel_type_id: fuelId,
@@ -168,7 +249,6 @@ function NewRequestSheet({ visible, onClose, onSaved, user }) {
         created_at: new Date().toISOString(),
         created_by_role: user?.role,
       });
-      // 2. Show it in the local list immediately, then best-effort sync.
       onClose();
       setQuantity(''); setDestination(''); setVehicleId(null); setFuelId(null);
       onSaved();
@@ -194,38 +274,25 @@ function NewRequestSheet({ visible, onClose, onSaved, user }) {
       )}
     >
       <Field label="Vehicle *" hint={vehicles.length === 0 ? 'No vehicles cached — sync first (Home → pull down).' : null}>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm }}>
           {vehicles.map((v) => (
             <Chip key={v.id} label={v.plate} sub={v.make} active={vehicleId === v.id} onPress={() => setVehicleId(v.id)} />
           ))}
         </View>
       </Field>
       <Field label="Fuel type *">
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm }}>
           {fuels.map((f) => (
             <Chip key={f.id} label={f.name} active={fuelId === f.id} onPress={() => setFuelId(f.id)} />
           ))}
         </View>
       </Field>
       <Field label="Quantity (litres) *" error={qtyError}>
-        <Input
-          keyboardType="decimal-pad"
-          value={quantity}
-          onChangeText={setQuantity}
-          placeholder="e.g. 40"
-          returnKeyType="done"
-        />
+        <Input keyboardType="decimal-pad" value={quantity} onChangeText={setQuantity} placeholder="e.g. 40" returnKeyType="done" />
       </Field>
       <Field label="Destination">
-        <Input
-          value={destination}
-          onChangeText={setDestination}
-          placeholder="optional"
-          returnKeyType="done"
-          autoCorrect={false}
-        />
+        <Input value={destination} onChangeText={setDestination} placeholder="optional" returnKeyType="done" autoCorrect={false} />
       </Field>
     </Sheet>
   );
 }
-
