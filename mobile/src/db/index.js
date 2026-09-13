@@ -109,8 +109,25 @@ export async function enqueue(type, payload) {
 
 export async function pendingOps(limit = 100) {
   return db.getAllAsync(
+    'SELECT * FROM outbox ORDER BY created_at ASC LIMIT ?', [limit],
+  );
+}
+
+// Ops the push loop should still try (exhausted ones are parked, not deleted).
+export async function opsNeedingPush(limit = 200) {
+  return db.getAllAsync(
     'SELECT * FROM outbox WHERE retry_count < 8 ORDER BY created_at ASC LIMIT ?', [limit],
   );
+}
+
+// Give parked (exhausted) ops another chance — operator action, never automatic.
+export async function resetRetries() {
+  await db.runAsync('UPDATE outbox SET retry_count = 0, last_error = NULL WHERE retry_count >= 8');
+}
+
+export async function opStillQueued(opId) {
+  const row = await db.getFirstAsync('SELECT 1 AS x FROM outbox WHERE op_id = ?', [opId]);
+  return !!row;
 }
 
 export async function outboxCount() {

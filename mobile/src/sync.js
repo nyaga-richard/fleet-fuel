@@ -12,7 +12,7 @@
 import * as NetInfo from '@react-native-community/netinfo';
 import { api } from './api';
 import {
-  kvGet, kvSet, deviceId, pendingOps, removeOp, failOp, replaceReferenceData, wipeLocalData,
+  kvGet, kvSet, deviceId, opsNeedingPush, removeOp, failOp, replaceReferenceData, wipeLocalData,
 } from './db';
 
 let syncing = false;
@@ -62,7 +62,7 @@ export async function fullSync() {
 
 // ── PUSH: replay the outbox exactly once per op (server-side idempotency) ────
 async function pushQueue() {
-  const ops = await pendingOps(200);
+  const ops = await opsNeedingPush(200);
   let pushed = 0;
   let failed = 0;
   if (ops.length > 0) {
