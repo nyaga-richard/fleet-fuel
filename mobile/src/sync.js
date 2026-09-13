@@ -97,20 +97,46 @@ async function pushQueue() {
   return { pushed, failed };
 }
 
+// Stock caches, written from one normalized shape:
+//   stock_snapshot → per fuel type (Home "Current stock" cards)
+//   stock_tanks    → per tank (fueling flow pump picker + low-stock warnings).
+// Both come from the server-side ledger, so a receipt made anywhere (web or
+// another device) is reflected on every device after its next pull/refresh.
+async function writeStockCaches(data) {
+  const byTank = (data.stock?.by_tank || []).map((t) => ({
+    id: t.id,
+    name: t.tank,
+    code: t.code,
+    balance: Number(t.balance || 0),
+    capacity: Number(t.capacity || 0),
+    fuel_type: t.fuel_type,
+    pct_full: t.pct_full,
+  }));
+  await kvSet('stock_tanks', JSON.stringify(byTank));
+  await kvSet('stock_snapshot', JSON.stringify(
+    (data.stock?.by_fuel_type || []).map((s) => ({
+      ...s,
+      capacity: byTank.filter((t) => t.code === s.code).reduce((a, t) => a + t.capacity, 0),
+    })),
+  ));
+}
+
+// Fresh stock straight from the server for screens that must not show a stale
+// snapshot (e.g. the fueling flow). Offline/unauthenticated → throws; callers
+// keep the last cached values. Also refreshes both stock caches above.
+export async function refreshStock() {
+  const data = await api.stock(); // { by_fuel_type, by_tank }
+  await writeStockCaches({ stock: data });
+  return data;
+}
+
+
 // ── PULL: authoritative snapshot / delta ─────────────────────────────────────
 async function pullServer() {
   const since = await kvGet('last_pull');
   const data = await api.pull(since || undefined);
   await replaceReferenceData(data);
-  // Stock snapshot (computed server-side from the authoritative ledger).
-  await kvSet('stock_snapshot', JSON.stringify(
-    (data.stock?.by_fuel_type || []).map((s) => ({
-      ...s,
-      capacity: (data.stock?.by_tank || [])
-        .filter((t) => t.code === s.code)
-        .reduce((a, t) => a + Number(t.capacity || 0), 0),
-    })),
-  ));
+  await writeStockCaches(data);
   await kvSet('last_pull', data.server_time);
   await kvSet('last_sync_success', new Date().toISOString());
   return {

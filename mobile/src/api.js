@@ -70,4 +70,5 @@ export const api = {
   pull: (since) => request(`/api/sync/pull${since ? `?since=${encodeURIComponent(since)}` : ''}`),
   pushBatch: (deviceId, ops) =>
     request('/api/sync/batch', { method: 'POST', body: { device_id: deviceId, ops } }),
+  stock: () => request('/api/inventory/stock'),
 };
