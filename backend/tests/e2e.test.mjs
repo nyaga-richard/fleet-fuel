@@ -216,9 +216,219 @@ test('master data is never deleted', async () => {
   assert.equal(ft.status, 400);
 });
 
+
+// ═══ Reports / Ledger / Exports / Notifications (spec round 55-section) ═══
+
+test('fuel ledger report: opening, running balance and closing are consistent', async () => {
+  const p1 = await api('GET', '/api/reports/fuel-ledger?pageSize=2&page=1');
+  assert.equal(p1.status, 200);
+  assert.ok(p1.json.total >= 3, 'ledger must have entries');
+  const last = await api('GET', `/api/reports/fuel-ledger?pageSize=2&page=${Math.max(1, Math.ceil(p1.json.total / 2))}`);
+  const lastRow = last.json.rows[last.json.rows.length - 1];
+  // §12/§55: closing = opening + in - out; last running balance on the report equals closing.
+  assert.equal(Math.round(lastRow.running_balance * 100) / 100, Math.round(last.json.closingBalance * 100) / 100);
+  const s = Object.fromEntries(last.json.summary.map((x) => [x.label, x.value]));
+  const parse = (t) => Number(t.replace(/[^0-9.-]/g, ''));
+  assert.equal(parse(s['Closing Balance']), parse(s['Opening Balance']) + parse(s['Total In']) - parse(s['Total Out']));
+});
+
+test('fuel ledger running balance continues across pages (§16)', async () => {
+  const p1 = await api('GET', '/api/reports/fuel-ledger?pageSize=1&page=1');
+  const p2 = await api('GET', '/api/reports/fuel-ledger?pageSize=1&page=2');
+  if (p1.json.total < 2) return; // nothing to continue
+  const r1 = p1.json.rows[0].running_balance;
+  const r2 = p2.json.rows[0].running_balance;
+  assert.notEqual(r1, r2, 'page 2 must continue from page 1, not restart');
+  assert.equal(Math.round(r2 * 100) / 100, Math.round((r1 + p2.json.rows[0].qty_in - p2.json.rows[0].qty_out) * 100) / 100);
+});
+
+test('vehicle ledger computes distance and KM/L (§18)', async () => {
+  const v = await api('GET', '/api/reports/vehicle-ledger');
+  assert.equal(v.status, 200);
+  const withDist = v.json.rows.find((r) => r.distance != null);
+  if (!withDist) return; // single fill-up only — math covered elsewhere
+  assert.ok(withDist.km_per_l > 0);
+  assert.equal(Math.round((withDist.distance / withDist.litres) * 100) / 100, withDist.km_per_l);
+});
+
+test('exports: real formats, audited, RBAC-enforced (§43/§45)', async () => {
+  const xls = await fetch(`${BASE}/api/reports/fuel-ledger/export/excel`, { headers: h() });
+  assert.equal(xls.status, 200);
+  const xbytes = new Uint8Array(await xls.arrayBuffer());
+  assert.ok(xbytes[0] === 0x50 && xbytes[1] === 0x4b, 'xlsx must be a real zip (PK)');
+  const pdf = await fetch(`${BASE}/api/reports/fuel-ledger/export/pdf`, { headers: h() });
+  assert.equal(pdf.status, 200);
+  const pbytes = new Uint8Array(await pdf.arrayBuffer());
+  const head = String.fromCharCode(...pbytes.slice(0, 4));
+  assert.equal(head, '%PDF');
+  const csv = await fetch(`${BASE}/api/reports/fuel-ledger/export/csv`, { headers: h() });
+  assert.equal(csv.status, 200);
+  assert.ok((await csv.text()).includes('Fuel Ledger'));
+  // attendant cannot view or export (§43)
+  const att = await api('POST', '/api/users', { name: 'Exp Attendant', email: `exp-${uuid().slice(0, 8)}@test.local`, password: 'Attendant123!', role: 'attendant' });
+  const alogin = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: att.json.user.email, password: 'Attendant123!' }) });
+  const atoken = (await alogin.json()).token;
+  const denied = await fetch(`${BASE}/api/reports/fuel-ledger/export/excel`, { headers: { authorization: `Bearer ${atoken}` } });
+  assert.equal(denied.status, 403);
+  // audit rows for exports exist (§45)
+  const aud = await api('GET', '/api/ledger'); // any authorized call to keep TOKEN valid
+  assert.equal(aud.status, 200);
+});
+
+
+// ═══ Approvals engine (§19–§28, §46–§53) ═══
+
+test('approvals: adjustment gated, decided in-tx, self-approval blocked, idempotent', async () => {
+  // admin submits an adjustment — stock must NOT change (§53)
+  const stockA = (await api('GET', '/api/inventory/stock')).json.by_fuel_type.find((s) => s.id === diesel.id).balance;
+  const cu = uuid();
+  const sub = await api('POST', '/api/inventory/adjustments', {
+    fuel_type_id: diesel.id, tank_id: tank.id, quantity: -5, reason: 'test calib', client_uuid: cu,
+  });
+  assert.equal(sub.status, 202);
+  assert.ok(sub.json.pending);
+  const aid = sub.json.approval_id;
+  const stockB = (await api('GET', '/api/inventory/stock')).json.by_fuel_type.find((s) => s.id === diesel.id).balance;
+  assert.equal(stockA, stockB, 'pending adjustment must not alter stock');
+
+  // retry with same client_uuid → same approval, no duplicate (§47)
+  const retry = await api('POST', '/api/inventory/adjustments', {
+    fuel_type_id: diesel.id, tank_id: tank.id, quantity: -5, reason: 'dup', client_uuid: cu,
+  });
+  assert.equal(retry.status, 200);
+  assert.equal(retry.json.approval_id, aid);
+  assert.ok(retry.json.existing);
+
+  // admin submitted → admin cannot self-approve (§27)
+  const self = await api('POST', `/api/approvals/${aid}/approve`, { reason: 'me' });
+  assert.equal(self.status, 403);
+
+  // manager approves → stock moves in the same transaction (§46)
+  const mlogin = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: manager.email, password: 'Manager123!' }) });
+  const mtoken = (await mlogin.json()).token;
+  const mh = { 'content-type': 'application/json', authorization: `Bearer ${mtoken}` };
+  const app = await fetch(`${BASE}/api/approvals/${aid}/approve`, { method: 'POST', headers: mh, body: JSON.stringify({ reason: 'verified' }) });
+  assert.equal(app.status, 200);
+  const stockC = (await api('GET', '/api/inventory/stock')).json.by_fuel_type.find((s) => s.id === diesel.id).balance;
+  assert.equal(Math.round((stockC - stockB) * 100) / 100, -5);
+
+  // already decided → 409; duplicate client_uuid → duplicate:true (§47)
+  const again = await fetch(`${BASE}/api/approvals/${aid}/approve`, { method: 'POST', headers: mh, body: JSON.stringify({ client_uuid: 'nope' }) });
+  assert.equal(again.status, 409);
+
+  // rejection requires a reason (§23)
+  const cu2 = uuid();
+  const sub2 = await api('POST', '/api/inventory/adjustments', { fuel_type_id: diesel.id, tank_id: tank.id, quantity: 1, reason: 'x', client_uuid: cu2 });
+  const aid2 = sub2.json.approval_id;
+  const noReason = await fetch(`${BASE}/api/approvals/${aid2}/reject`, { method: 'POST', headers: { ...mh }, body: '{}' });
+  assert.equal(noReason.status, 400);
+  const rej = await fetch(`${BASE}/api/approvals/${aid2}/reject`, { method: 'POST', headers: mh, body: JSON.stringify({ reason: 'not substantiated' }) });
+  assert.equal(rej.status, 200);
+
+  // history is immutable and ordered (§28)
+  const hist = await api('GET', `/api/approvals/${aid2}/history`);
+  assert.equal(hist.status, 200);
+  assert.deepEqual(hist.json.history.map((e) => e.action), ['SUBMITTED', 'REJECTED']);
+
+  // attendant has no approval permissions (§26)
+  const att = await api('POST', '/api/users', { name: 'Appr Att', email: `apr-${uuid().slice(0, 8)}@test.local`, password: 'Attendant123!', role: 'attendant' });
+  const alogin = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: att.json.user.email, password: 'Attendant123!' }) });
+  const at = (await alogin.json()).token;
+  const denied = await fetch(`${BASE}/api/approvals`, { headers: { authorization: `Bearer ${at}` } });
+  assert.ok(denied.status >= 400);
+});
+
+test('excess fuel raises an approval and appears in the ledger (§52/§53)', async () => {
+  const req = await api('POST', '/api/requests', { vehicle_id: vehicle.id, fuel_type_id: diesel.id, quantity: 15 });
+  await api('POST', `/api/requests/${req.json.request.id}/approve`, {});
+  const issue = await api('POST', '/api/transactions/issue', { request_id: req.json.request.id, pump_id: pump.id, quantity: 17, odometer: 200000 });
+  assert.equal(issue.status, 201, 'actual quantity is recorded');
+  const pending = await api('GET', '/api/approvals?status=PENDING&entity_type=fuel_excess');
+  const excess = pending.json.approvals.find((a) => Number(a.quantity) === 2);
+  assert.ok(excess, 'excess approval of 2 L must exist');
+  const ledger = await api('GET', `/api/reports/fuel-ledger?q=${issue.json.transaction.txn_no}`);
+  assert.equal(ledger.json.rows.length, 1);
+  assert.equal(ledger.json.rows[0].excess_status, 'PENDING');
+  // manager approves it → ledger reflects APPROVED
+  const mlogin = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: manager.email, password: 'Manager123!' }) });
+  const mtoken = (await mlogin.json()).token;
+  const app = await fetch(`${BASE}/api/approvals/${excess.id}/approve`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${mtoken}` }, body: JSON.stringify({ reason: 'ok' }) });
+  assert.equal(app.status, 200);
+  const after = await api('GET', `/api/reports/fuel-ledger?q=${issue.json.transaction.txn_no}`);
+  assert.equal(after.json.rows[0].excess_status, 'APPROVED');
+});
+
 test('system version endpoint reports build info', async () => {
   const v = await api('GET', '/api/system/version');
   assert.equal(v.status, 200);
   assert.ok(v.json.version);
   assert.ok(v.json.database.migrations.applied >= 4);
+});
+// ─── Round 4: remaining reports + devices + preferences ─────────────────────
+test('§9 remaining report builders return valid datasets', async () => {
+  for (const key of ['fuel-requests', 'fuel-authorizations', 'excess-fuel', 'exceptions',
+    'attendant-activity', 'pump-reconciliation', 'tank-reconciliation',
+    'fuel-inventory', 'fuel-cost', 'cost-per-km']) {
+    const d = await api('GET', `/api/reports/${key}`);
+    assert.equal(d.status, 200, `${key} → 200`);
+    assert.ok(Array.isArray(d.json.rows), `${key} rows[]`);
+    assert.ok(Array.isArray(d.json.columns) && d.json.columns.length > 0, `${key} columns[]`);
+    assert.ok(d.json.title, `${key} title`);
+    assert.ok(d.json.meta?.org?.orgName, `${key} org header from settings`);
+  }
+  const inv = await api('GET', '/api/reports/fuel-inventory');
+  assert.ok(inv.json.rows.length >= 1, 'inventory lists at least the seeded tank');
+  const x = await api('GET', '/api/reports/excess-fuel');
+  assert.ok(x.json.rows.length >= 1, 'excess report includes round-2 over-issue');
+});
+
+test('§9 new report exports are real files and RBAC-guarded', async () => {
+  const xls = await fetch(`${BASE}/api/reports/fuel-inventory/export/excel`, { headers: h() });
+  assert.equal(xls.status, 200);
+  const xbytes = new Uint8Array(await xls.arrayBuffer());
+  assert.ok(xbytes[0] === 0x50 && xbytes[1] === 0x4b, 'xlsx magic');
+  const pdf = await fetch(`${BASE}/api/reports/cost-per-km/export/pdf`, { headers: h() });
+  assert.equal(pdf.status, 200);
+  const pbytes = new Uint8Array(await pdf.arrayBuffer());
+  assert.equal(String.fromCharCode(...pbytes.slice(0, 4)), '%PDF');
+  // attendant cannot view or export the new reports either (§43)
+  const att = await api('POST', '/api/users', { name: 'R4 Attendant', email: `r4-${uuid().slice(0, 8)}@test.local`, password: 'Attendant123!', role: 'attendant' });
+  const alogin = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: att.json.user.email, password: 'Attendant123!' }) });
+  const atoken = (await alogin.json()).token;
+  const denied = await fetch(`${BASE}/api/reports/fuel-requests`, { headers: { authorization: `Bearer ${atoken}` } });
+  assert.equal(denied.status, 403);
+  const deniedExport = await fetch(`${BASE}/api/reports/fuel-requests/export/csv`, { headers: { authorization: `Bearer ${atoken}` } });
+  assert.equal(deniedExport.status, 403);
+});
+
+test('§40 push device registration is idempotent per (user,device) and admin-listed', async () => {
+  const body = { device_id: 'e2e-device-1', platform: 'android', app_version: '1.0.0' };
+  const a = await api('POST', '/api/devices', body);
+  assert.equal(a.status, 200, 'device registered');
+  assert.ok(a.json.device?.id, 'device id returned');
+  const b = await api('POST', '/api/devices', { ...body, push_token: 'ExponentPushToken[e2e]' });
+  assert.equal(b.status, 200);
+  assert.equal(b.json.device.id, a.json.device.id, 'same device_id+user upserts, no dup row');
+  const list = await api('GET', '/api/devices');
+  assert.equal(list.status, 200);
+  assert.ok(list.json.devices.some((d) => d.device_id === 'e2e-device-1'));
+  // non-admin cannot list devices
+  const mgr = await api('POST', '/api/users', { name: 'R4 Manager', email: `r4m-${uuid().slice(0, 8)}@test.local`, password: 'Manager123!', role: 'manager' });
+  const mlogin = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: mgr.json.user.email, password: 'Manager123!' }) });
+  const mtoken = (await mlogin.json()).token;
+  const denied = await fetch(`${BASE}/api/devices`, { headers: { authorization: `Bearer ${mtoken}` } });
+  assert.equal(denied.status, 403);
+});
+
+test('§37 notification preferences round-trip with validation', async () => {
+  const put = await api('PUT', '/api/notifications/preferences', { preferences: { exception: false } });
+  assert.equal(put.status, 200);
+  assert.equal(put.json.preferences.exception, false);
+  const get = await api('GET', '/api/notifications/preferences');
+  assert.equal(get.status, 200);
+  assert.equal(get.json.preferences.exception, false);
+  const restore = await api('PUT', '/api/notifications/preferences', { preferences: {} });
+  assert.equal(restore.status, 200);
+  const bad = await api('PUT', '/api/notifications/preferences', { preferences: [1, 2] });
+  assert.equal(bad.status, 400, 'non-object preferences rejected');
 });

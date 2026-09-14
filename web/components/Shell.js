@@ -18,6 +18,9 @@ const NAV = [
   { group: 'Overview', links: [
     { href: '/', label: 'Dashboard', roles: ['admin', 'manager', 'attendant'], icon: 'dash' },
     { href: '/ledger', label: 'Fuel Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'book' },
+    { href: '/vehicle-ledger', label: 'Vehicle Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },
+    { href: '/approvals', label: 'Approvals', roles: ['admin', 'manager'], icon: 'check' },
+    { href: '/reports', label: 'Reports', roles: ['admin', 'manager'], icon: 'book' },
   ]},
   { group: 'Operations', links: [
     { href: '/requests', label: 'Fuel Requests', roles: ['admin', 'manager', 'attendant'], icon: 'file' },
@@ -121,7 +124,7 @@ export default function Shell({ children }) {
         </button>
         <span className="topbar-brand">Fleet Fuel</span>
         <GlobalSearch user={user} compact />
-        <AlertBell count={isDecider ? alerts : 0} />
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><AlertBell count={isDecider ? alerts : 0} /><NotifBell /></span>
         <UserChip user={user} menu={menu} setMenu={setMenu} logout={logout} compact />
       </header>
 
@@ -153,7 +156,7 @@ export default function Shell({ children }) {
           <h1>{currentTitle(NAV, pathname)}</h1>
           <div className="head-actions">
             <GlobalSearch user={user} />
-            <AlertBell count={isDecider ? alerts : 0} />
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><AlertBell count={isDecider ? alerts : 0} /><NotifBell /></span>
             <UserChip user={user} menu={menu} setMenu={setMenu} logout={logout} />
           </div>
         </div>
@@ -166,6 +169,84 @@ export default function Shell({ children }) {
 function currentTitle(nav, path) {
   for (const g of nav) for (const l of g.links) if (l.href === path) return l.label;
   return 'Fleet Fuel';
+}
+
+
+// Notification center bell (§31) — unread count polled; panel lists recent
+// notifications, opening one marks it read and navigates to the entity (§33).
+function NotifBell() {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState([]);
+  const [unread, setUnread] = useState(0);
+  const ref = useRef(null);
+
+  const load = useCallback(async () => {
+    try {
+      const d = await api('/api/notifications?limit=12');
+      setItems(d.notifications || []); setUnread(d.unread || 0);
+    } catch { /* offline — keep last */ }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  useEffect(() => {
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  async function openItem(n) {
+    if (!n.is_read) {
+      setItems((xs) => xs.map((x) => (x.id === n.id ? { ...x, is_read: true } : x)));
+      setUnread((u) => Math.max(0, u - 1));
+      api('/api/notifications/' + n.id + '/read', { method: 'PATCH' }).catch(() => {});
+    }
+    const href = n.entity_type === 'fuel_request' ? '/requests'
+      : n.entity_type === 'fuel_transaction' ? '/issue'
+      : n.entity_type === 'ledger' ? '/ledger'
+      : n.entity_type === 'approval' ? '/requests'
+      : null;
+    setOpen(false);
+    if (href) window.location.assign(href);
+  }
+
+  return (
+    <span className="notif-wrap" ref={ref}>
+      <button className="bell" onClick={() => { setOpen(!open); if (!open) load(); }}
+        aria-haspopup="menu" aria-expanded={open} aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'}>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" /></svg>
+        {unread > 0 && <span className="bell-badge">{unread > 9 ? '9+' : unread}</span>}
+      </button>
+      {open && (
+        <div className="notif-panel" role="menu">
+          <div className="notif-head">
+            <b>Notifications</b>
+            {unread > 0 && (
+              <button className="notif-markall" onClick={async () => {
+                setItems((xs) => xs.map((x) => ({ ...x, is_read: true }))); setUnread(0);
+                api('/api/notifications/read-all', { method: 'PATCH' }).catch(() => {});
+              }}>Mark all as read</button>
+            )}
+          </div>
+          {items.length === 0 && <div className="notif-empty">You're all caught up.</div>}
+          {items.map((n) => (
+            <button key={n.id} className={'notif-item' + (n.is_read ? '' : ' unread')} onClick={() => openItem(n)}>
+              <span className={'notif-dot sev-' + (n.severity || 'INFO').toLowerCase()} />
+              <span className="notif-body">
+                <b>{n.title}</b>
+                {n.message && <span className="notif-msg">{n.message}</span>}
+                <span className="notif-time">{new Date(n.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', hour12: false })}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
 }
 
 function AlertBell({ count }) {

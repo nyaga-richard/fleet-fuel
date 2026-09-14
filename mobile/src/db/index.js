@@ -80,6 +80,11 @@ export async function initDb() {
       fuel_type_id TEXT, quantity REAL, status TEXT, driver_name TEXT,
       created_at TEXT, updated_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY, title TEXT, message TEXT, type TEXT,
+      severity TEXT, entity_type TEXT, entity_id TEXT,
+      is_read INTEGER DEFAULT 0, created_at TEXT
+    );
     CREATE TABLE IF NOT EXISTS transactions (
       id TEXT PRIMARY KEY, txn_no TEXT, request_id TEXT, vehicle_id TEXT, plate TEXT,
       fuel_type_id TEXT, quantity REAL, status TEXT, created_at TEXT, updated_at TEXT
@@ -268,4 +273,36 @@ export async function replaceReferenceData(pull) {
     await db.execAsync('ROLLBACK');
     throw err;
   }
+}
+
+// ── Notifications cache (server is authority; this is the offline view) ──────
+export async function replaceNotifications(rows) {
+  await dbReady();
+  await db.runAsync('DELETE FROM notifications');
+  for (const n of rows || []) {
+    await db.runAsync(
+      'INSERT OR REPLACE INTO notifications (id, title, message, type, severity, entity_type, entity_id, is_read, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      [n.id, n.title, n.message ?? '', n.type ?? '', n.severity ?? 'INFO', n.entity_type ?? '', n.entity_id ?? '', n.is_read ? 1 : 0, n.created_at]);
+  }
+}
+
+export async function cachedNotifications(limit = 100) {
+  await dbReady();
+  return db.getAllAsync('SELECT * FROM notifications ORDER BY created_at DESC LIMIT ?', [limit]);
+}
+
+export async function localUnreadCount() {
+  await dbReady();
+  const row = await db.getFirstAsync('SELECT count(*) AS n FROM notifications WHERE is_read = 0');
+  return row?.n ?? 0;
+}
+
+export async function markLocalRead(id) {
+  await dbReady();
+  await db.runAsync('UPDATE notifications SET is_read = 1 WHERE id = ?', [id]);
+}
+
+export async function markAllLocalRead() {
+  await dbReady();
+  await db.runAsync('UPDATE notifications SET is_read = 1');
 }

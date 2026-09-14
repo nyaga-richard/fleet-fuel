@@ -17,6 +17,10 @@ import inventoryRoutes from './routes/inventory.js';
 import ledgerRoutes from './routes/ledger.js';
 import syncRoutes from './routes/sync.js';
 import systemRoutes from './routes/system.js';
+import reportsRoutes from './routes/reports.js';
+import notificationsRoutes from './routes/notifications.js';
+import approvalsRoutes from './routes/approvals.js';
+import devicesRoutes from './routes/devices.js';
 
 export function createApp() {
   const app = express();
@@ -60,6 +64,10 @@ export function createApp() {
   app.use('/api/ledger', ledgerRoutes);
   app.use('/api/sync', syncRoutes);
   app.use('/api/system', systemRoutes);
+  app.use('/api/reports', reportsRoutes);
+  app.use('/api/notifications', notificationsRoutes);
+  app.use('/api/approvals', approvalsRoutes);
+app.use('/api/devices', devicesRoutes);
 
   app.use('/api', notFoundHandler);
   app.get('/', (_req, res) => res.json({ service: 'fleet-fuel-api', docs: '/api/health', version: config.version }));

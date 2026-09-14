@@ -6,6 +6,8 @@
 // ============================================================================
 import { findByClientUuid, postLedgerEntry } from './ledger.js';
 import { audit } from './audit.js';
+import { notify, notifyRoles } from './notify.js';
+import { createApproval } from './approvals.js';
 import { nextDocNumber } from './numbering.js';
 import { ApiError } from '../middleware/errors.js';
 
@@ -46,6 +48,14 @@ export async function createFuelRequest(client, { payload, userId }) {
       userId, clientUuid, payload.created_at ?? null],
   );
   await audit(client, { userId, action: 'fuel_request.create', entity: 'fuel_requests', entityId: rows[0].id, details: { request_no: requestNo, quantity: qty } });
+  await notifyRoles(client, ['manager', 'admin'], {
+    type: 'fuel_request.submitted',
+    title: 'New fuel request submitted',
+    message: `${rows[0].request_no} — ${qty} L submitted for approval.`,
+    entityType: 'fuel_request', entityId: rows[0].id,
+    severity: 'INFO', dedupKey: `fuel_request.submitted:${rows[0].id}`,
+    metadata: { request_no: rows[0].request_no, quantity: qty },
+  }, { excludeUserId: userId });
   return { row: rows[0], duplicate: false };
 }
 
@@ -71,6 +81,27 @@ export async function decideFuelRequest(client, { requestId, decision, userId, c
     [requestId, decision],
   );
   await audit(client, { userId, action: `fuel_request.${decision}`, entity: 'fuel_requests', entityId: requestId, details: { request_no: request.request_no, comments } });
+  if (decision === 'approved') {
+    await notify(client, {
+      userId: request.requested_by,
+      type: 'fuel_request.approved',
+      title: `Fuel request ${request.request_no} approved`,
+      message: `Your fuel request ${request.request_no} was approved and is ready for fueling.`,
+      entityType: 'fuel_request', entityId: request.id,
+      severity: 'SUCCESS', dedupKey: `fuel_request.approved:${request.id}`,
+      metadata: { request_no: request.request_no, decided_by: userId },
+    });
+  } else if (decision === 'rejected') {
+    await notify(client, {
+      userId: request.requested_by,
+      type: 'fuel_request.rejected',
+      title: `Fuel request ${request.request_no} rejected`,
+      message: comments ? `Reason: ${comments}` : 'Your fuel request was rejected.',
+      entityType: 'fuel_request', entityId: request.id,
+      severity: 'WARNING', dedupKey: `fuel_request.rejected:${request.id}`,
+      metadata: { request_no: request.request_no, reason: comments ?? null },
+    });
+  }
   return updated[0];
 }
 
@@ -169,6 +200,23 @@ export async function issueFuel(client, { payload, userId }) {
 
   await client.query(`UPDATE fuel_requests SET status = 'issued', updated_at = now() WHERE id = $1`, [request.id]);
   await audit(client, { userId, action: 'fuel_transaction.issue', entity: 'fuel_transactions', entityId: inserted[0].id, details: { txn_no: txnNo, quantity: qty, ledger_entry: entry.id } });
+  // §52/§53 — issuing beyond the authorized quantity records the ACTUAL
+  // quantity (physical truth, never silently altered) and raises an excess
+  // approval. The approval tracks the review separately from the movement.
+  const excess = Number(request.quantity) > 0 ? +(qty - Number(request.quantity)).toFixed(3) : 0;
+  if (excess > 0.0001) {
+    await createApproval(client, {
+      entityType: 'fuel_excess',
+      entityId: inserted[0].id,
+      requestedBy: userId,
+      quantity: excess,
+      payload: { txn_no: txnNo, request_no: request.request_no, authorized: Number(request.quantity), actual: qty, excess },
+      clientUuid: clientUuid ?? null,
+      notifyTitle: 'Excess fuel approval required',
+      notifyMessage: `${request.request_no}: authorized ${request.quantity} L, issued ${qty} L (excess ${excess} L).`,
+      severity: 'WARNING',
+    });
+  }
 
   return { row: { ...inserted[0], balance_after: entry.balance_after }, duplicate: false };
 }

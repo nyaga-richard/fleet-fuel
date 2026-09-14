@@ -2,13 +2,14 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, FlatList, RefreshControl, TouchableOpacity } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
+  Icon,
   Screen, ScreenHeader, SectionHeader, Card, StatCard, TxnCard, Btn,
   EmptyState, OfflineBanner, useTabBarPad,
 } from '../../src/components';
-import { kvGet, cachedTransactions, cachedRequests, outboxCount } from '../../src/db';
+import { kvGet, cachedTransactions, cachedRequests, outboxCount, localUnreadCount } from '../../src/db';
 import { getSyncState, onSyncChange, fullSync } from '../../src/sync';
 import { useAuth } from '../../src/auth';
-import { C, spacing as SP } from '../../theme';
+import { C, spacing as SP , ICON } from '../../theme';
 import { fmtQty, fmtNum, fmtDateTime, todayKey } from '../../src/fmt';
 
 // Role-aware dashboard (spec §29–30) built from shared components.
@@ -25,6 +26,7 @@ export default function HomeScreen() {
   const [lastSync, setLastSync] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [unread, setUnread] = useState(0);
 
   const load = useCallback(async () => {
     const raw = await kvGet('stock_snapshot');
@@ -34,6 +36,7 @@ export default function HomeScreen() {
     setPendingOps(await outboxCount());
     setLastSync(await kvGet('last_sync_success'));
     setSyncing(!!getSyncState().syncing);
+    setUnread(await localUnreadCount());
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -62,10 +65,29 @@ export default function HomeScreen() {
         subtitle={isAttendant ? 'Attendant · ready to fuel' : `${(user?.role || '').replace(/^\w/, (c) => c.toUpperCase())} overview`}
         right={(
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/sync')} accessibilityLabel="Open sync status" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={{ color: pendingOps > 0 ? C.amber : C.muted, fontSize: 12, fontWeight: '600' }}>
-                {syncing ? '⟳ Syncing…' : pendingOps > 0 ? `⏳ ${pendingOps} queued` : '✓ Synced'}
+            <TouchableOpacity onPress={() => router.push('/(tabs)/sync')} accessibilityLabel="Open sync status" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Icon
+                name={syncing ? 'sync-circle' : pendingOps > 0 ? 'clock-outline' : 'check-circle-outline'}
+                size={ICON.sm}
+                color={syncing || pendingOps > 0 ? C.amber : C.green}
+              />
+              <Text style={{ color: syncing || pendingOps > 0 ? C.amber : C.green, fontSize: 12, fontWeight: '600' }}>
+                {syncing ? 'Syncing…' : pendingOps > 0 ? `${pendingOps} queued` : 'Synced'}
               </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/alerts')}
+              accessibilityRole="button"
+              accessibilityLabel={`Notifications, ${unread} unread`}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}
+            >
+              <Icon name="bell-outline" size={ICON.md} color={unread > 0 ? C.amber : C.muted} />
+              {unread > 0 && (
+                <View style={{ backgroundColor: C.red, borderRadius: 8, minWidth: 15, height: 15, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ color: '#fff', fontSize: 9.5, fontWeight: '800' }}>{unread > 9 ? '9+' : unread}</Text>
+                </View>
+              )}
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => router.push('/profile')}
@@ -101,7 +123,10 @@ export default function HomeScreen() {
 
             {isAttendant && approvedCount > 0 && (
               <Card style={{ borderColor: C.green, marginTop: SP.md }}>
-                <Text style={{ color: C.text, fontSize: 14, fontWeight: '700' }}>🚚 {approvedCount} authorized request(s) waiting</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Icon name="clipboard-check-outline" size={ICON.lg} color={C.green} />
+                  <Text style={{ color: C.text, fontSize: 14, fontWeight: '700', flex: 1 }}>{approvedCount} authorized request(s) waiting</Text>
+                </View>
                 <Text style={{ color: C.muted, fontSize: 12.5, marginVertical: 4 }}>Open Fueling to dispense — works offline.</Text>
                 <Btn label="Go to Fueling" onPress={() => router.push('/(tabs)/issue')} />
               </Card>
@@ -134,15 +159,15 @@ export default function HomeScreen() {
 
             {!isAttendant && (
               <View style={{ flexDirection: 'row', gap: SP.md, marginTop: SP.md }}>
-                <Btn label="＋ New request" onPress={() => router.push('/(tabs)/requests')} style={{ flex: 1 }} />
-                {canIssue && <Btn label="⛽ Fueling" variant="secondary" onPress={() => router.push('/(tabs)/issue')} style={{ flex: 1 }} />}
+                <Btn label="New request" icon="plus" onPress={() => router.push('/(tabs)/requests')} style={{ flex: 1 }} />
+                {canIssue && <Btn label="Fueling" icon="gas-station" variant="secondary" onPress={() => router.push('/(tabs)/issue')} style={{ flex: 1 }} />}
               </View>
             )}
 
             <SectionHeader style={{ marginTop: SP.xl - 4 }}>Recent activity</SectionHeader>
             {recent.length === 0 && (
               <EmptyState
-                icon="⛽"
+                icon="gas-station-outline"
                 title="Nothing here yet"
                 message="Pull down to sync your vehicles, fuel types and requests from the server."
                 action={<Btn label="Sync now" onPress={refresh} />}

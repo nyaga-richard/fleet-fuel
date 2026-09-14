@@ -10,6 +10,7 @@
     "prebuild": "expo prebuild"
   },
   "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
     "@react-native-community/netinfo": "12.0.1",
     "expo": "~57.0.22",
     "expo-constants": "~57.0.18",

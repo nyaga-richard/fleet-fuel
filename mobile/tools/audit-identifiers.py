@@ -86,6 +86,11 @@ def main():
         code = strip_noncode(open(f).read())
         defined = collect_defined(code)
         called = set(re.findall(r"(?<![\w.$])([A-Za-z_$][\w$]*)\s*\(", code))
+        # JSX component tags (<Icon, <Screen, …) are runtime identifier
+        # references bundlers cannot check — an undefined component must fail
+        # the audit here, not as a ReferenceError on device. Uppercase-only
+        # avoids matching `a < b` comparisons.
+        called |= set(re.findall(r"<([A-Z][A-Za-z0-9_]*)", code))
         missing = sorted(c for c in called if c not in defined)
         if missing:
             problems.append((os.path.relpath(f, ROOT), missing))

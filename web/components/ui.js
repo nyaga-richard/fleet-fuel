@@ -1,4 +1,7 @@
 'use client';
+// Exports (see ExportMenu below).
+import { api, apiBlob, downloadBlob } from '@/lib/api';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Reusable web UI kit — one visual language for every page.
 // Card · Stat · StatusPill · Field · Notice · Tabs · Table · DataTable ·
@@ -7,6 +10,123 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useRef, useState } from 'react';
 import { STATUS_COLORS } from '@/lib/format';
+
+
+// ── Export menu (§1–§8) ──────────────────────────────────────────────────────
+// One consistent [ Export ▾ ] control: PDF / Excel / CSV come from the server
+// (same filters, same authorization, audited) and Print renders the SAME
+// server dataset into a print-only window (no app chrome, §8).
+export function ExportMenu({ report, params = {}, formats = ['pdf', 'excel', 'csv', 'print'], label = 'Export' }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  const qs = () => new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '')).toString();
+
+  async function run(fmt) {
+    setOpen(false); setError(''); setBusy(fmt);
+    try {
+      if (fmt === 'print') {
+        const ds = await api('/api/reports/' + report + '?' + qs());
+        printDataset(ds);
+      } else {
+        const { blob, filename } = await apiBlob('/api/reports/' + report + '/export/' + fmt + '?' + qs());
+        downloadBlob(blob, filename);
+      }
+    } catch (e) {
+      setError(e.message || 'Export failed');
+    } finally { setBusy(''); }
+  }
+
+  const items = [
+    formats.includes('pdf') && { id: 'pdf', label: 'PDF', sub: 'Formatted report' },
+    formats.includes('excel') && { id: 'excel', label: 'Excel', sub: '.xlsx workbook' },
+    formats.includes('csv') && { id: 'csv', label: 'CSV', sub: 'Raw data' },
+    formats.includes('print') && { id: 'print', label: 'Print', sub: 'Paper / PDF printer' },
+  ].filter(Boolean);
+
+  return (
+    <span className="xm-wrap" ref={ref}>
+      <button className="btn secondary sm" onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} disabled={!!busy}>
+        {busy ? 'Preparing…' : label + ' ▾'}
+      </button>
+      {error && <span className="xm-error" role="alert">{error}</span>}
+      {open && (
+        <div className="xm-menu" role="menu">
+          {items.map((it) => (
+            <button key={it.id} role="menuitem" className="xm-item" onClick={() => run(it.id)}>
+              <b>{it.label}</b>
+              <span>{it.sub}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+// Print-only document (§8): org header, title, filters, summary, table,
+// totals — navigation/buttons/filters of the app are never included.
+function printDataset(ds) {
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const cur = ds.meta.org.currency;
+  const fmtCell = (c, r) => {
+    const v = r[c.key];
+    if (v == null || v === '') return '';
+    if (c.type === 'datetime') return esc(new Date(v).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', hour12: false }));
+    if (c.type === 'date') return esc(new Date(v).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi' }));
+    if (c.type === 'money') return esc(cur + ' ' + Number(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    if (c.type === 'number') return esc(Number(v).toLocaleString('en-GB', { maximumFractionDigits: 3 }));
+    return esc(v);
+  };
+  const now = new Date().toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', hour12: false });
+  const head = ds.columns.map((c) => '<th>' + esc(c.label) + '</th>').join('');
+  const body = ds.rows.map((r) => '<tr>' + ds.columns.map((c) => '<td>' + fmtCell(c, r) + '</td>').join('') + '</tr>').join('');
+  const foot = ds.totals
+    ? '<tfoot><tr>' + ds.columns.map((c, i) => {
+        if (i === 0) return '<td>TOTAL</td>';
+        const v = ds.totals[c.key];
+        if (v == null) return '<td></td>';
+        const cell = c.type === 'money'
+          ? esc(cur + ' ' + Number(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+          : Number(v).toLocaleString('en-GB', { maximumFractionDigits: 2 });
+        return '<td>' + cell + '</td>';
+      }).join('') + '</tr></tfoot>'
+    : '';
+  const html = '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(ds.title) + '</title><style>'
+    + 'body{font:11px/1.45 -apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#111;margin:24px}'
+    + '.org{font-size:16px;font-weight:800}.line{color:#555;margin-bottom:10px}'
+    + 'h1{font-size:14px;margin:12px 0 4px;text-transform:uppercase;letter-spacing:.4px}'
+    + '.meta{color:#444;font-size:10px;white-space:pre-line;margin-bottom:10px}'
+    + 'table{border-collapse:collapse;width:100%}'
+    + 'th{background:#1f3a5f;color:#fff;text-align:left;font-size:9.5px;padding:5px 6px}'
+    + 'td{border-bottom:1px solid #e3e7ee;padding:4px 6px;font-size:9.8px;vertical-align:top}'
+    + 'tr:nth-child(even) td{background:#f4f6fa}'
+    + 'tfoot td{font-weight:800;border-top:2px solid #1f3a5f}'
+    + 'thead{display:table-header-group}'
+    + '@page{size:' + (ds.orientation === 'landscape' ? 'A4 landscape' : 'A4 portrait') + ';margin:12mm}'
+    + '@media print{body{margin:0}}'
+    + '</style></head><body>'
+    + '<div class="org">' + esc(ds.meta.org.orgName) + '</div>'
+    + '<div class="line">' + esc(ds.meta.org.reportLine) + '</div>'
+    + '<h1>' + esc(ds.title) + '</h1>'
+    + '<div class="meta">' + esc(ds.meta.filters.join('\n')) + '\nGenerated: ' + esc(now) + '</div>'
+    + '<table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody>' + foot + '</table>'
+    + '</body></html>';
+  const w = window.open('', '_blank', 'width=1100,height=800');
+  if (!w) { alert('Allow pop-ups to print.'); return; }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { w.print(); }, 350);
+}
 
 export function Card({ title, children, actions }) {
   return (
@@ -243,13 +363,14 @@ export function Skeleton({ lines = 4, cards = false }) {
   );
 }
 
-export function ConfirmDialog({ open, title = 'Are you sure?', message, confirmLabel = 'Confirm', danger = false, busy = false, onConfirm, onCancel }) {
+export function ConfirmDialog({ open, title = 'Are you sure?', message, children, confirmLabel = 'Confirm', danger = false, busy = false, onConfirm, onCancel }) {
   if (!open) return null;
   return (
     <div className="overlay" onClick={busy ? undefined : onCancel} role="dialog" aria-modal="true" aria-label={title}>
       <div className="dialog" onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0 }}>{title}</h3>
         {message && <p className="muted">{message}</p>}
+        {children}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 }}>
           <button className="btn secondary" onClick={onCancel} disabled={busy}>Cancel</button>
           <button className={`btn ${danger ? 'danger' : ''}`} onClick={onConfirm} disabled={busy}>

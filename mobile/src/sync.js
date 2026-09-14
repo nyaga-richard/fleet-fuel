@@ -12,7 +12,7 @@
 import * as NetInfo from '@react-native-community/netinfo';
 import { api } from './api';
 import {
-  kvGet, kvSet, deviceId, opsNeedingPush, removeOp, failOp, replaceReferenceData, wipeLocalData,
+  kvGet, kvSet, deviceId, opsNeedingPush, removeOp, failOp, replaceReferenceData, wipeLocalData, replaceNotifications,
 } from './db';
 
 let syncing = false;
@@ -142,6 +142,12 @@ async function pullServer() {
   await writeStockCaches(data);
   await kvSet('last_pull', data.server_time);
   await kvSet('last_sync_success', new Date().toISOString());
+  // Notifications for THIS user (§39): online path — cached locally so the
+  // center works offline. Dedup/immutability is the server's job (§47).
+  try {
+    const notif = await api.notifications(100);
+    await replaceNotifications(notif.notifications || []);
+  } catch { /* non-fatal */ }
   return {
     vehicles: data.reference.vehicles.length,
     requests: (data.requests || []).length,

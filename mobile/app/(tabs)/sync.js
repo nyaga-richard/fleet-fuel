@@ -2,13 +2,14 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, FlatList, RefreshControl } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
+  Icon,
   Screen, ScreenHeader, SectionHeader, Card, Btn, EmptyState, StatusBadge,
   useNetState, useTabBarPad,
 } from '../../src/components';
 import { pendingOps, outboxCount, deviceId, kvGet, resetRetries } from '../../src/db';
 import { fullSync, getSyncState, onSyncChange } from '../../src/sync';
 import { API_URL } from '../../src/api';
-import { C, spacing as SP } from '../../theme';
+import { C, spacing as SP, ICON } from '../../theme';
 import { fmtDateTime } from '../../src/fmt';
 
 // Sync status (spec §28) — never hides failures, never auto-deletes them.
@@ -53,7 +54,13 @@ export default function SyncScreen() {
       <Card>
         <Text style={{ color: C.muted, fontSize: 12, marginBottom: SP.sm }}>
           {lastSync ? `Last successful sync: ${fmtDateTime(lastSync)}` : 'Never synced on this device'}
-          {' · '}{net.isConnected ? '● online' : '● offline'}
+          {' · '}
+        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Icon name={net.isConnected ? 'cloud-check-outline' : 'cloud-off-outline'} size={ICON.sm} color={net.isConnected ? C.green : C.amber} />
+          <Text style={{ color: C.muted, fontSize: 12 }}>{net.isConnected ? 'online' : 'offline'}</Text>
+        </View>
+        <Text style={{ color: C.muted, fontSize: 12 }}>
         </Text>
         <View style={{ flexDirection: 'row', gap: SP.md }}>
           <View style={[s.stat, { flex: 1 }]}>
@@ -82,7 +89,7 @@ export default function SyncScreen() {
           <Text style={{ color: C.muted, fontSize: 12, marginVertical: 4 }}>
             They are NEVER deleted automatically. The exact server reason is shown on each item below. Fix the cause (often empty tank stock — record a bulk receipt on the web console) then reset & retry.
           </Text>
-          <Btn label="RESET & RETRY FAILED" variant="warn" busy={busy} onPress={async () => { setBusy(true); await resetRetries(); await fullSync(); await load(); setBusy(false); }} />
+          <Btn label="RESET & RETRY FAILED" icon="refresh" variant="warn" busy={busy} onPress={async () => { setBusy(true); await resetRetries(); await fullSync(); await load(); setBusy(false); }} />
         </Card>
       )}
 
@@ -109,7 +116,7 @@ export default function SyncScreen() {
           </Card>
         )}
         ListEmptyComponent={(
-          <EmptyState icon="✓" title="Queue is empty" message="Everything from this device is on the server." />
+          <EmptyState icon="check-circle-outline" title="Queue is empty" message="Everything from this device is on the server." />
         )}
         refreshControl={<RefreshControl refreshing={busy} onRefresh={syncNow} tintColor={C.muted} />}
         contentContainerStyle={{ paddingBottom: bottomPad }}

@@ -15,12 +15,19 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as NetInfo from '@react-native-community/netinfo';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   C, spacing as SP, SCREEN_PAD, SCREEN_PAD_SM, SECTION_GAP, CARD_PAD, CARD_GAP,
   FIELD_GAP, INPUT_H, BTN_H, BTN_H_LG, BTN_H_SM, SEARCH_H, TABBAR_CONTENT_H,
-  T, radius as R, shadowCard, shadowFloat, STATUS_COLOR,
+  T, radius as R, shadowCard, shadowFloat, STATUS_COLOR, ICON,
 } from '../theme';
 import { fmtQty, fmtDateTime } from './fmt';
+
+// App-wide icon (Material Community set — consistent stroke/weight).
+// Icons ALWAYS accompany text labels (spec §13/§37: never the sole indicator).
+export function Icon({ name, size = ICON.md, color = C.text, ...rest }) {
+  return <MaterialCommunityIcons name={name} size={size} color={color} {...rest} />;
+}
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
 export function useNetState() {
@@ -129,7 +136,7 @@ export function RequestCard({ request, onPress }) {
   return (
     <Card onPress={onPress}>
       <View style={styles.rowBetween}>
-        <Text style={T.mono}>{r.request_no || '⏳ pending sync'}</Text>
+        <Text style={T.mono}>{r.request_no || 'pending sync'}</Text>
         <StatusBadge status={r.status} />
       </View>
       <Text style={[T.cardTitle, { fontSize: 16, marginTop: 6 }]} numberOfLines={1}>
@@ -177,7 +184,7 @@ export function StatusBadge({ status }) {
   );
 }
 
-export function Btn({ label, onPress, variant = 'primary', busy, disabled, small, large, style }) {
+export function Btn({ label, onPress, variant = 'primary', busy, disabled, small, large, icon, style }) {
   const bg = { primary: C.accent, secondary: C.panel2, success: C.green, danger: C.red, warn: C.amber }[variant] || C.accent;
   const off = disabled || busy;
   return (
@@ -189,7 +196,12 @@ export function Btn({ label, onPress, variant = 'primary', busy, disabled, small
       accessibilityState={{ disabled: off, busy }}
       style={[styles.btn, { backgroundColor: bg, height: small ? BTN_H_SM : large ? BTN_H_LG : BTN_H, opacity: off ? 0.5 : 1 }, style]}
     >
-      {busy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.btnText}>{label}</Text>}
+      {busy ? <ActivityIndicator color="#fff" size="small" /> : (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {!!icon && <Icon name={icon} size={small ? ICON.sm : ICON.md} color="#ffffff" />}
+          <Text style={styles.btnText}>{label}</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 }
@@ -203,7 +215,12 @@ export function Field({ label, hint, error, children }) {
     <View style={{ marginBottom: FIELD_GAP }}>
       {!!label && <Text style={[T.label, { marginBottom: 6 }]}>{label}</Text>}
       {children}
-      {!!error && <Text style={styles.fieldError}>⚠ {error}</Text>}
+      {!!error && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+          <Icon name="alert-circle" size={ICON.sm} color={C.red} />
+          <Text style={styles.fieldError}>{error}</Text>
+        </View>
+      )}
       {!!hint && !error && <Text style={styles.fieldHint}>{hint}</Text>}
     </View>
   );
@@ -227,7 +244,7 @@ export function Chip({ label, active, onPress, sub }) {
 export function SearchBar({ value, onChange, placeholder = 'Search…', autoFocus = false }) {
   return (
     <View style={styles.searchWrap}>
-      <Text style={styles.searchIcon}>🔍</Text>
+      <Icon name="magnify" size={ICON.md} color={C.muted} style={styles.searchIcon} />
       <TextInput
         value={value}
         onChangeText={onChange}
@@ -243,7 +260,7 @@ export function SearchBar({ value, onChange, placeholder = 'Search…', autoFocu
       />
       {!!value && (
         <TouchableOpacity onPress={() => onChange('')} accessibilityLabel="Clear search" style={styles.searchClear} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Text style={{ color: C.muted, fontSize: 15 }}>✕</Text>
+          <Icon name="close" size={ICON.md} color={C.muted} />
         </TouchableOpacity>
       )}
     </View>
@@ -259,16 +276,18 @@ export function FilterButton({ count, onPress }) {
       accessibilityLabel="Open filters"
       style={[styles.filterBtn, on && styles.filterBtnOn]}
     >
-      <Text style={[styles.filterBtnText, on && { color: '#fff' }]}>⚙ Filters{on ? ` · ${count}` : ''}</Text>
+      <Text style={[styles.filterBtnText, on && { color: '#fff' }]}>
+        <Icon name="cog-outline" size={ICON.sm} color={on ? '#ffffff' : C.muted} />
+        Filters{on ? ` · ${count}` : ''}</Text>
     </TouchableOpacity>
   );
 }
 
 // ── States ───────────────────────────────────────────────────────────────────
-export function EmptyState({ icon = '◌', title, message, action }) {
+export function EmptyState({ icon = 'circle-outline', title, message, action }) {
   return (
     <View style={styles.empty}>
-      <Text style={{ fontSize: 28, marginBottom: SP.sm }}>{icon}</Text>
+      <Icon name={icon} size={ICON.xxl} color={C.muted} style={{ marginBottom: SP.sm }} />
       <Text style={styles.emptyTitle}>{title}</Text>
       {!!message && <Text style={styles.emptyMsg}>{message}</Text>}
       {action}
@@ -280,9 +299,10 @@ export function OfflineBanner({ lastSync }) {
   const net = useNetState();
   if (net.checked && net.isConnected) return null;
   return (
-    <View style={styles.offline}>
-      <Text style={styles.offlineText}>
-        ● Offline — changes are saved on this device and will sync automatically{lastSync ? ` · last sync ${fmtRelShort(lastSync)}` : ''}
+    <View style={[styles.offline, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+      <Icon name="cloud-off-outline" size={ICON.md} color="#fcd34d" />
+      <Text style={[styles.offlineText, { flex: 1 }]}>
+        Offline — changes are saved on this device and will sync automatically{lastSync ? ` · last sync ${fmtRelShort(lastSync)}` : ''}
       </Text>
     </View>
   );
@@ -322,7 +342,7 @@ export function Sheet({ visible, onClose, title, children, footer, maxHeight = '
             <View style={styles.sheetHead}>
               <Text style={[T.cardTitle, { fontSize: 17 }]}>{title}</Text>
               <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Text style={{ color: C.muted, fontSize: 16 }}>✕</Text>
+                <Icon name="close" size={ICON.lg} color={C.muted} />
               </TouchableOpacity>
             </View>
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, paddingTop: SP.md, paddingBottom: SP.xl }}>
@@ -376,16 +396,16 @@ export function SelectField({ label, placeholder = 'Select…', value, onChange,
               </>
             : <Text style={[T.body, { color: C.muted }]}>{placeholder}</Text>}
         </View>
-        <Text style={{ color: C.muted, fontSize: 12 }}>▼</Text>
+        <Icon name="chevron-down" size={ICON.md} color={C.muted} />
       </TouchableOpacity>
 
       <Sheet visible={open} onClose={() => { setOpen(false); setQ(''); }} title={label ? `Select ${String(label).replace(/\s*\*$/, '')}` : 'Select'}>
         <SearchBar value={q} onChange={setQ} placeholder="Type to search…" autoFocus />
         {options.length === 0 && (
-          <EmptyState icon="☁" title="Nothing available" message={emptyHint || 'No records are cached on this device yet. Sync first, then try again.'} />
+          <EmptyState icon="cloud-off-outline" title="Nothing available" message={emptyHint || 'No records are cached on this device yet. Sync first, then try again.'} />
         )}
         {options.length > 0 && list.length === 0 && (
-          <EmptyState icon="🔍" title={`No matches for “${q.trim()}”`} message="Try a different spelling or clear the search." />
+          <EmptyState icon="text-search" title={`No matches for “${q.trim()}”`} message="Try a different spelling or clear the search." />
         )}
         {list.map((o) => {
           const on = o.value === value;
@@ -401,7 +421,7 @@ export function SelectField({ label, placeholder = 'Select…', value, onChange,
                 <Text style={[T.bodyStrong, on && { color: C.accent2 }]} numberOfLines={1}>{o.label}</Text>
                 {!!o.sub && <Text style={T.secondary} numberOfLines={1}>{o.sub}</Text>}
               </View>
-              {on && <Text style={{ color: C.accent2, fontSize: 16, fontWeight: '800' }}>✓</Text>}
+              {on && <Icon name="check-bold" size={ICON.md} color={C.accent2} />}
             </TouchableOpacity>
           );
         })}

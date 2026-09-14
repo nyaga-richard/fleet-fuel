@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Screen, ScreenHeader, Card, Btn, KV, Confirm, useNetState } from '../src/components';
+import { Icon, Screen, ScreenHeader, Card, Btn, KV, Confirm, useNetState } from '../src/components';
 import { useAuth } from '../src/auth';
 import { api } from '../src/api';
 import { deviceId, kvGet, outboxCount } from '../src/db';
-import { C } from '../theme';
+import { C , ICON } from '../theme';
 import { fmtDateTime } from '../src/fmt';
 
 // Profile (spec §1–3): everything shown comes from the authenticated session
@@ -69,16 +69,16 @@ export default function ProfileScreen() {
         <KV rows={[
           ['Role', (user?.role || '—').replace(/^\w/, (c) => c.toUpperCase())],
           ['Email', user?.email || '—'],
-          ['Session', sessionOk === true ? '✓ Verified just now' : sessionOk === false ? '⚠ Invalid — you will be signed out' : net.isConnected ? 'Checking…' : 'Offline — using cached session'],
+          ['Session', sessionOk === true ? 'Verified just now' : sessionOk === false ? 'INVALID — you will be signed out' : net.isConnected ? 'Checking…' : 'Offline — using cached session'],
         ]} />
       </Card>
 
       <Card>
         <KV rows={[
           ['Device', device || '—'],
-          ['Connection', net.isConnected ? '● Online' : '● Offline'],
+          ['Connection', net.isConnected ? 'Online' : 'Offline'],
           ['Last sync', lastSync ? fmtDateTime(lastSync) : 'never'],
-          ['Pending operations', pending > 0 ? `⏳ ${pending} queued` : '✓ None'],
+          ['Pending operations', pending > 0 ? `${pending} queued` : 'None'],
         ]} />
         {pending > 0 && (
           <Text style={{ color: C.amber, fontSize: 12, marginTop: 10 }}>
@@ -87,9 +87,9 @@ export default function ProfileScreen() {
         )}
       </Card>
 
-      <Btn label="🔄 Sync status" variant="secondary" onPress={() => router.push('/(tabs)/sync')} />
+      <Btn label="Sync status" icon="sync" variant="secondary" onPress={() => router.push('/(tabs)/sync')} />
       <View style={{ height: 12 }} />
-      <Btn label="🚪 Sign out" variant="danger" onPress={() => setConfirmOut(true)} />
+      <Btn label="Sign out" icon="logout" variant="danger" onPress={() => setConfirmOut(true)} />
 
       <Confirm
         visible={confirmOut}
@@ -110,7 +110,7 @@ function BackHeader({ onPress, title }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 12 }}>
       <TouchableOpacity onPress={onPress} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-        <Text style={{ color: C.accent2, fontSize: 22 }}>←</Text>
+        <Icon name="arrow-left" size={ICON.xl} color={C.accent2} />
       </TouchableOpacity>
       <Text style={{ color: C.text, fontSize: 17, fontWeight: '800' }}>{title}</Text>
     </View>

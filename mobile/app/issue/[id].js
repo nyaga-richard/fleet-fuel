@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { Screen, Card, Btn, Field, Input, SelectField, KV, StatusBadge } from '../../src/components';
+import { Screen, Card, Btn, Field, Input, SelectField, KV, StatusBadge, Icon } from '../../src/components';
 import { cachedRequests, cachedPumps, cachedVehicles, cachedFuelTypes, enqueue, outboxCount, kvGet, opStillQueued } from '../../src/db';
 import { getSyncState, fullSync, refreshStock } from '../../src/sync';
-import { C, spacing as SP } from '../../theme';
+import { C, spacing as SP, ICON } from '../../theme';
 import { fmtQty } from '../../src/fmt';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -119,7 +119,7 @@ export default function FuelingFlow() {
     return (
       <Screen scroll>
         <Card style={{ borderColor: C.green, borderWidth: 1, alignItems: 'center', paddingVertical: SP.xl }}>
-          <Text style={{ fontSize: 38, marginBottom: 6 }}>✓</Text>
+          <Icon name="check-circle-outline" size={ICON.xxl} color={C.green} style={{ marginBottom: 6 }} />
           <Text style={{ color: C.text, fontSize: 19, fontWeight: '800' }}>Fueling completed</Text>
           <Text style={{ color: done.synced ? C.green : C.amber, fontSize: 12.5, fontWeight: '700', marginTop: 4 }}>
             {done.synced ? 'Status: SYNCED' : 'Status: PENDING SYNC'}
@@ -152,7 +152,7 @@ export default function FuelingFlow() {
     <Screen scroll keyboard>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 12 }}>
         <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Text style={{ color: C.accent2, fontSize: 22 }}>←</Text>
+          <Icon name="arrow-left" size={ICON.xl} color={C.accent2} />
         </TouchableOpacity>
         <Text style={{ color: C.text, fontSize: 17, fontWeight: '800', flexShrink: 1 }} numberOfLines={1}>Fueling — {req.request_no || 'pending sync'}</Text>
       </View>
@@ -225,16 +225,22 @@ export default function FuelingFlow() {
         </Field>
         {excess && (
           <Card style={{ borderColor: C.amber, borderWidth: 1, marginBottom: 0 }}>
-            <Text style={{ color: '#fcd34d', fontSize: 12.5 }}>
-              ⚠ You entered {fmtQty(qty)} — that exceeds the authorized {fmtQty(authorized)}. The server will hold this transaction for manager approval.
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Icon name="alert" size={ICON.md} color="#fcd34d" />
+              <Text style={{ color: '#fcd34d', fontSize: 12.5, flex: 1 }}>
+                You entered {fmtQty(qty)} — that exceeds the authorized {fmtQty(authorized)}. The server will hold this transaction for manager approval.
+              </Text>
+            </View>
           </Card>
         )}
         {lowStock && !excess && (
           <Card style={{ borderColor: C.amber, borderWidth: 1, marginBottom: 0 }}>
-            <Text style={{ color: '#fcd34d', fontSize: 12.5 }}>
-              ⚠ Tank has only {fmtQty(tankBalance)} — issuing {fmtQty(qty)} will be rejected by the server until stock is received (Inventory → Bulk receipts on the web console).
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Icon name="fuel" size={ICON.md} color="#fcd34d" />
+              <Text style={{ color: '#fcd34d', fontSize: 12.5, flex: 1 }}>
+                Tank has only {fmtQty(tankBalance)} — issuing {fmtQty(qty)} will be rejected by the server until stock is received (Inventory → Bulk receipts on the web console).
+              </Text>
+            </View>
           </Card>
         )}
       </Step>
@@ -261,13 +267,14 @@ export default function FuelingFlow() {
             ['End meter', endMeter || (suggestedEnd ? `${suggestedEnd} (calc)` : '—')],
             ['Authorized', fmtQty(authorized)],
             ['Issuing', fmtQty(Number.isFinite(qty) ? qty : 0)],
-            ['Excess', excess ? '⚠ needs manager approval' : 'none'],
+            ['Excess', excess ? 'needs manager approval' : 'none'],
           ]} />
         </Card>
       </Step>
 
       <Btn
-        label={busy ? 'COMPLETING…' : '✓ COMPLETE FUELING'}
+        label={busy ? 'COMPLETING…' : 'COMPLETE FUELING'}
+        icon="check-bold"
         variant="success"
         large
         busy={busy}

@@ -1,170 +1,181 @@
 'use client';
-// Fuel Ledger — the immutable accounting view over inventory_transactions.
-// Filters (fuel type, entry type, date range) are SERVER-side; running
-// balances come from the database, so they stay correct under any filter.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+// Fuel Ledger (§10–§17) — first-class accounting view.
+//   • Running balance is computed SERVER-SIDE across the whole filtered set,
+//     so pagination can never falsify it (§16).
+//   • Opening/closing derive from every valid entry before Date From (§12).
+//   • Export ▾ (PDF/Excel/CSV/Print) reuses the exact same server filters (§44).
+//   • Clicking a row drills into the source entry (§17).
+import { useCallback, useEffect, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, SearchInput, Notice, Field, DataTable, StatusPill, Skeleton, Stat, SearchableSelect } from '@/components/ui';
+import { Card, PageHeader, SearchInput, Field, StatusPill, Skeleton, Stat, SearchableSelect, ExportMenu, Drawer } from '@/components/ui';
 import { api } from '@/lib/api';
-import { fmtQty, fmtDateTime } from '@/lib/format';
+import { fmtQty, fmtDateTime, fmtKES } from '@/lib/format';
+
+const ENTRY_TYPES = [
+  { value: 'opening', label: 'Opening Balance' },
+  { value: 'receipt', label: 'Bulk Receipt' },
+  { value: 'issue', label: 'Fuel Issue' },
+  { value: 'adjustment', label: 'Adjustment' },
+  { value: 'reversal', label: 'Reversal' },
+];
 
 export default function LedgerPage() {
   return <Shell><Ledger /></Shell>;
 }
 
 function Ledger() {
-  const [refs, setRefs] = useState([]);
+  const today = new Date().toISOString().slice(0, 10);
+  const monthAgo = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
+  const [from, setFrom] = useState(monthAgo);
+  const [to, setTo] = useState(today);
   const [fuelTypeId, setFuelTypeId] = useState('');
   const [entryType, setEntryType] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
   const [q, setQ] = useState('');
-  const [entries, setEntries] = useState(null);
-  const [summary, setSummary] = useState([]);
-  const [error, setError] = useState('');
+  const [debouncedQ, setDebouncedQ] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(25);
+  const [data, setData] = useState(null);
+  const [fuels, setFuels] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [detail, setDetail] = useState(null);
+
+  useEffect(() => { const t = setTimeout(() => setDebouncedQ(q), 300); return () => clearTimeout(t); }, [q]);
 
   useEffect(() => {
-    api('/api/fuel-types').then((r) => setRefs(r.fuel_types)).catch((e) => setError(e.message));
+    api('/api/fuel-types').then((r) => setFuels(r.fuel_types || [])).catch(() => {});
   }, []);
 
+  const params = {
+    from, to,
+    fuel_type_id: fuelTypeId || undefined,
+    entry_type: entryType || undefined,
+    q: debouncedQ || undefined,
+  };
+
   const load = useCallback(async () => {
-    setError('');
+    setBusy(true);
     try {
-      const p = new URLSearchParams({ limit: '500' });
-      if (fuelTypeId) p.set('fuel_type_id', fuelTypeId);
-      if (entryType) p.set('entry_type', entryType);
-      if (from) p.set('from', from);
-      if (to) p.set('to', to);
-      const [e, s] = await Promise.all([
-        api(`/api/ledger?${p.toString()}`),
-        api(`/api/ledger/summary${fuelTypeId ? `?fuel_type_id=${fuelTypeId}` : ''}`),
-      ]);
-      setEntries(e.entries);
-      setSummary(s.summary);
-    } catch (e) { setError(e.message); }
-  }, [fuelTypeId, entryType, from, to]);
+      const qs = new URLSearchParams({ ...Object.fromEntries(Object.entries(params).filter(([, v]) => v)), page: String(page), pageSize: String(pageSize) });
+      setData(await api('/api/reports/fuel-ledger?' + qs.toString()));
+    } catch { setData(null); }
+    finally { setBusy(false); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to, fuelTypeId, entryType, debouncedQ, page, pageSize]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setPage(1); }, [from, to, fuelTypeId, entryType, debouncedQ]);
 
-  const filtered = useMemo(() => {
-    if (!entries) return [];
-    const term = q.trim().toLowerCase();
-    if (!term) return entries;
-    const m = (s) => String(s ?? '').toLowerCase().includes(term);
-    return entries.filter((r) => m(r.description) || m(r.fuel_type_name) || m(r.tank_name) || m(r.entry_type) || m(r.performed_by_name));
-  }, [entries, q]);
-
-  function exportCsv() {
-    const header = ['Date', 'Entry', 'Fuel', 'Tank', 'Quantity', 'Balance after', 'Description', 'By'];
-    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const lines = filtered.map((r) => [
-      fmtDateTime(r.created_at), r.entry_type, r.fuel_type_name, r.tank_name || '',
-      Number(r.quantity).toFixed(2), Number(r.balance_after).toFixed(2),
-      r.description || '', r.performed_by_name || 'system',
-    ].map(esc).join(','));
-    const blob = new Blob(['\uFEFF' + [header.join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `fuel-ledger-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  const summary = data?.summary || [];
+  const total = data?.total || 0;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const from1 = total === 0 ? 0 : (data.page - 1) * data.pageSize + 1;
+  const to1 = Math.min(total, data.page * data.pageSize);
 
   return (
     <>
       <PageHeader
         title="Fuel Ledger"
-        subtitle="Every stock movement — immutable, reconstructible, audited"
-        actions={<button className="btn secondary" onClick={exportCsv} disabled={!filtered?.length}>⬇ Export CSV</button>}
+        subtitle="Accounting view — every stock movement with its running balance"
+        actions={<ExportMenu report="fuel-ledger" params={{ ...params, page: 1, pageSize: 1000 }} />}
       />
 
-      {error && <Notice kind="error" onDone={() => setError('')}>{error}</Notice>}
-
-      <div className="grid c3" style={{ marginBottom: 18 }}>
-        {!summary.length && !fuelTypeId ? null : (summary || []).map((s) => (
-          <div className="card" key={s.fuel_type_id} style={{ marginBottom: 0 }}>
-            <h3 style={{ textTransform: 'uppercase', letterSpacing: '.5px' }}>{s.fuel_type}</h3>
-            <table className="tbl">
-              <tbody>
-                <tr><td className="muted">Opening balance</td><td className="num">{fmtQty(s.opening_balance)}</td></tr>
-                <tr><td className="muted">Receipts</td><td className="num pos">+{fmtQty(s.receipts)}</td></tr>
-                <tr><td className="muted">Issues</td><td className="num neg">{fmtQty(s.issues)}</td></tr>
-                <tr><td className="muted">Adjustments</td><td className="num">{fmtQty(s.adjustments)}</td></tr>
-                <tr><td className="muted">Reversals</td><td className="num pos">+{fmtQty(s.reversals)}</td></tr>
-                <tr><td><b>Closing balance</b></td><td className="num"><b>{fmtQty(s.closing_balance)}</b></td></tr>
-              </tbody>
-            </table>
-          </div>
-        ))}
+      <div className="cards4">
+        {summary.map((s) => <Stat key={s.label} label={s.label} value={s.value} />)}
       </div>
 
-      <Card title="Ledger entries">
-        <div className="grid c4" style={{ marginBottom: 12 }}>
+      <Card>
+        <div className="frow">
+          <Field label="Date from"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></Field>
+          <Field label="Date to"><input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
           <Field label="Fuel type">
-            <SearchableSelect value={fuelTypeId} onChange={setFuelTypeId} placeholder="All fuel types"
-              options={refs.map((f) => ({ value: f.id, label: f.name, sub: f.code || '' }))} />
+            <SearchableSelect
+              value={fuelTypeId} onChange={setFuelTypeId} placeholder="All fuel types"
+              options={[{ value: '', label: 'All fuel types' }, ...fuels.map((f) => ({ value: f.id, label: f.name, sub: f.code || '' }))]}
+            />
           </Field>
-          <Field label="Entry type">
-            <SearchableSelect value={entryType} onChange={setEntryType} placeholder="All entries"
-              options={[
-                { value: 'opening', label: 'Opening' },
-                { value: 'receipt', label: 'Receipt' },
-                { value: 'issue', label: 'Issue' },
-                { value: 'adjustment', label: 'Adjustment' },
-                { value: 'reversal', label: 'Reversal' },
-              ]} />
-          </Field>
-          <Field label="From date">
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-          </Field>
-          <Field label="To date">
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          <Field label="Transaction type">
+            <SearchableSelect
+              value={entryType} onChange={setEntryType} placeholder="All transactions"
+              options={[{ value: '', label: 'All transactions' }, ...ENTRY_TYPES]}
+            />
           </Field>
         </div>
         <div style={{ marginBottom: 12 }}>
-          <SearchInput value={q} onChange={setQ} placeholder="Search particulars, tank, user…" width={300} />
+          <SearchInput value={q} onChange={setQ} placeholder="Search reference, particulars, vehicle…" width={320} />
         </div>
 
-        {!entries ? <Skeleton lines={8} /> : (
-          <DataTable
-            columns={[
-              { key: 'created_at', label: 'Date', render: (r) => fmtDateTime(r.created_at) },
-              { key: 'entry_type', label: 'Entry', render: (r) => <StatusPill status={r.entry_type} /> },
-              { key: 'fuel_type_name', label: 'Fuel' },
-              { key: 'tank_name', label: 'Tank', render: (r) => r.tank_name || '—' },
-              {
-                key: 'quantity', label: 'Qty in / out', num: true, render: (r) => (
-                  <span className={Number(r.quantity) >= 0 ? 'pos' : 'neg'}>
-                    {Number(r.quantity) >= 0 ? '+' : ''}{fmtQty(r.quantity, '')}
-                  </span>
-                ),
-              },
-              { key: 'balance_after', label: 'Running balance', num: true, render: (r) => fmtQty(r.balance_after, '') },
-              { key: 'description', label: 'Particulars', render: (r) => r.description || '—' },
-              { key: 'performed_by_name', label: 'User', render: (r) => r.performed_by_name || 'system' },
-            ]}
-            rows={filtered}
-            pageSize={30}
-            mobileCard={(r) => (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                  <StatusPill status={r.entry_type} />
-                  <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: Number(r.quantity) >= 0 ? 'var(--green)' : 'var(--amber)' }}>
-                    {Number(r.quantity) >= 0 ? '+' : ''}{fmtQty(r.quantity, '')}
-                  </span>
-                </div>
-                <div style={{ margin: '5px 0 3px', fontWeight: 600 }}>{r.fuel_type_name}{r.tank_name ? ` · ${r.tank_name}` : ''}</div>
-                <div className="muted" style={{ fontSize: 12 }}>{r.description || '—'}</div>
-                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                  Balance: <b>{fmtQty(r.balance_after, '')}</b> · {fmtDateTime(r.created_at)}
-                </div>
-              </>
-            )}
-            empty={q ? `No entries match “${q}”` : 'No ledger entries yet — stock comes from deliveries and openings'}
-          />
+        {!data ? <Skeleton lines={10} /> : (
+          <>
+            <div className="dt-tablewrap">
+              <table className="tbl sticky">
+                <thead>
+                  <tr>
+                    <th>Date</th><th>Reference</th><th>Particulars</th><th>Fuel</th><th>Type</th>
+                    <th className="num">Qty In</th><th className="num">Qty Out</th><th className="num">Running</th>
+                    <th className="num">Amount</th><th>Vehicle</th><th>Tank</th><th>User</th><th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.length === 0 && (
+                    <tr><td colSpan={13} className="muted" style={{ textAlign: 'center', padding: 24 }}>
+                      No ledger entries in this period for the selected filters.
+                    </td></tr>
+                  )}
+                  {data.rows.map((r) => (
+                    <tr key={r.id} className="clickable" onClick={() => setDetail(r)}>
+                      <td className="nowrap">{fmtDateTime(r.date)}</td>
+                      <td className="mono">{r.reference}</td>
+                      <td className="wrap" style={{ maxWidth: 260 }}>{r.particulars}</td>
+                      <td>{r.fuel_type}</td>
+                      <td><StatusPill status={r.raw_type} /></td>
+                      <td className="num pos">{r.qty_in ? fmtQty(r.qty_in, '') : ''}</td>
+                      <td className="num neg">{r.qty_out ? fmtQty(r.qty_out, '') : ''}</td>
+                      <td className="num" style={{ fontWeight: 700 }}>{fmtQty(r.running_balance, '')}</td>
+                      <td className="num">{r.amount != null ? fmtKES(r.amount) : '—'}</td>
+                      <td>{r.vehicle || '—'}</td>
+                      <td>{r.tank || '—'}</td>
+                      <td>{r.user || 'system'}</td>
+                      <td><StatusPill status={r.status} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="pager">
+              <button className="btn secondary sm" disabled={page <= 1 || busy} onClick={() => setPage(page - 1)}>← Previous</button>
+              <span className="muted">Showing {from1.toLocaleString()}–{to1.toLocaleString()} of {total.toLocaleString()}</span>
+              <button className="btn secondary sm" disabled={page >= pages || busy} onClick={() => setPage(page + 1)}>Next →</button>
+            </div>
+          </>
         )}
       </Card>
+
+      <Drawer open={!!detail} onClose={() => setDetail(null)} title="Ledger entry" subtitle={detail?.reference}>
+        {detail && (
+          <div className="kv">
+            {[
+              ['Date', fmtDateTime(detail.date)],
+              ['Reference', detail.reference],
+              ['Particulars', detail.particulars],
+              ['Fuel type', detail.fuel_type],
+              ['Transaction type', detail.entry_type],
+              ['Qty in', detail.qty_in ? fmtQty(detail.qty_in) : '—'],
+              ['Qty out', detail.qty_out ? fmtQty(detail.qty_out) : '—'],
+              ['Running balance', fmtQty(detail.running_balance)],
+              ['Unit cost', detail.unit_cost != null ? fmtKES(detail.unit_cost) : '—'],
+              ['Amount', detail.amount != null ? fmtKES(detail.amount) : '—'],
+              ['Vehicle', detail.vehicle || '—'],
+              ['Pump', detail.pump || '—'],
+              ['Tank', detail.tank || '—'],
+              ['User', detail.user || 'system'],
+              ['Status', detail.status],
+            ].map(([k, v]) => (
+              <div className="kv-row" key={k}><span className="kv-k">{k}</span><span className="kv-v">{v}</span></div>
+            ))}
+          </div>
+        )}
+      </Drawer>
     </>
   );
 }

@@ -85,6 +85,45 @@ eas build -p android --profile preview
 The first build runs in Expo's cloud (~10–15 min, free tier available). When it
 finishes you get a **download URL for `app-release.apk`**.
 
+### ⚠️ EAS builds do NOT see your local `.env` — configure the API URL for EAS
+
+`EXPO_PUBLIC_API_URL` is **inlined into the JS bundle at build time, on the
+machine that builds**. For `eas build` that is Expo's cloud — your local
+`mobile/.env` is not uploaded (it stays git-ignored, as it should). An APK
+built without it starts with *"EXPO_PUBLIC_API_URL is not set"*. Configure it
+ONCE with either method, then **rebuild** — editing `.env` never changes an
+already-built APK:
+
+**Method A (recommended — keeps the URL out of the repo entirely):**
+1. Go to <https://expo.dev/projects> → your project → **Environment variables**
+2. Add `EXPO_PUBLIC_API_URL` = `https://api.trustedsystems.co.ke`
+   - Visibility: **Plain text** (it's a public URL, but plain text makes it
+     visible to the build)
+   - Create it for BOTH the **preview** and **production** environments.
+
+**Method B (quick, in `mobile/eas.json` — the URL is public, not a secret):**
+
+```json
+{
+  "build": {
+    "preview":     { "android": { "buildType": "apk" },
+                     "env": { "EXPO_PUBLIC_API_URL": "https://api.trustedsystems.co.ke" } },
+    "production":  { "env": { "EXPO_PUBLIC_API_URL": "https://api.trustedsystems.co.ke" } }
+  }
+}
+```
+(merge into the profiles EAS generated — keep any existing keys)
+
+Then rebuild and verify:
+
+```bash
+eas build -p android --profile preview
+# install over the existing app (same package + keystore) → login screen
+# must reach the server; Home → Sync tab shows the API URL it is using
+```
+
+Local dev with `npx expo start` keeps using `mobile/.env` exactly as before.
+
 Distribute it:
 - Send the APK to devices → open → allow "install from this source" → done.
 - Each device gets its own `device_id`; sync logs in the server keep per-device

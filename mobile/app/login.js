@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
-import { Screen, Card, Btn, Field, Input } from '../src/components';
+import { Screen, Card, Btn, Field, Input, Icon } from '../src/components';
 import { kvGet, kvRemove } from '../src/db';
 import { useAuth } from '../src/auth';
 import { API_URL } from '../src/api';
-import { C, spacing as SP } from '../theme';
+import { C, spacing as SP , ICON } from '../theme';
 
 export default function LoginScreen() {
   const { login } = useAuth();
@@ -44,12 +44,20 @@ export default function LoginScreen() {
     <Screen keyboard scroll>
       <View style={{ flex: 1, justifyContent: 'center', paddingVertical: SP.xxxl }}>
         <Card style={{ maxWidth: 430, width: '100%', alignSelf: 'center', padding: SP.xxl }}>
-          <Text style={{ color: C.text, fontSize: 24, fontWeight: '700', letterSpacing: -0.5 }}>⛽ Fleet Fuel</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Icon name="gas-station" size={ICON.xxl} color={C.accent2} />
+            <Text style={{ color: C.text, fontSize: 24, fontWeight: '700', letterSpacing: -0.5 }}>Fleet Fuel</Text>
+          </View>
           <Text style={{ color: C.muted, fontSize: 14, marginTop: 4, marginBottom: SP.lg }}>
             Offline-capable fuel management
           </Text>
           {!!notice && <Text style={{ color: C.amber, fontSize: 12.5, marginBottom: SP.md, fontWeight: '600' }}>{notice}</Text>}
-          {!!error && <Text style={{ color: C.red, fontSize: 12.5, marginBottom: SP.md, fontWeight: '600' }}>⚠ {error}</Text>}
+          {!!error && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: SP.md }}>
+              <Icon name="alert-circle" size={ICON.sm} color={C.red} />
+              <Text style={{ color: C.red, fontSize: 12.5, fontWeight: '600', flex: 1 }}>{error}</Text>
+            </View>
+          )}
           <Field label="Email">
             <Input
               autoCapitalize="none"

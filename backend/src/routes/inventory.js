@@ -11,6 +11,7 @@ import { needUuid, needNum, needStr, needOneOf, optUuid, isUuid } from '../middl
 import { createReceipt, createAdjustment, createReading } from '../services/ops.js';
 import { stockByFuelType, stockByTank, ledgerSummary } from '../services/ledger.js';
 import { config } from '../config.js';
+import { createApproval } from '../services/approvals.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -65,6 +66,25 @@ router.post('/adjustments', requireRole('manager', 'admin'), asyncH(async (req, 
     quantity: needNum(req.body, 'quantity', { signed: true, max: 1_000_000 }),
     reason: needStr(req.body, 'reason', { max: 300 }),
   };
+  // §20/§53 — adjustments route through approval by default: the fuel-ledger
+  // entry is posted ONLY when the approval is APPROVED (same transaction),
+  // so a pending/rejected adjustment can never alter finalized stock.
+  const { rows: cfg } = await pool.query(`SELECT value FROM settings WHERE key = 'approvals.adjustments_require_approval'`);
+  const requireApproval = cfg.length ? cfg[0].value !== false : true;
+  if (requireApproval) {
+    const { id, existing } = await createApproval(pool, {
+      entityType: 'inventory_adjustment',
+      entityId: isUuid(String(req.body.client_uuid || '')) ? String(req.body.client_uuid) : (isUuid(String(req.body.entity_id || '')) ? String(req.body.entity_id) : crypto.randomUUID()),
+      requestedBy: req.user.sub,
+      quantity: payload.quantity,
+      payload,
+      clientUuid: isUuid(String(req.body.client_uuid || '')) ? String(req.body.client_uuid) : null,
+      notifyTitle: 'Inventory adjustment requires approval',
+      notifyMessage: `${payload.quantity > 0 ? '+' : ''}${payload.quantity} L — ${payload.reason}`,
+      severity: 'WARNING',
+    });
+    return res.status(existing ? 200 : 202).json({ approval_id: id, pending: true, existing });
+  }
   const { row } = await tx((client) => createAdjustment(client, { payload, userId: req.user.sub }));
   res.status(201).json({ adjustment: row });
 }));

@@ -67,7 +67,7 @@ export default function FuelingScreen() {
       {pendingCount > 0 && (
         <Card style={{ borderColor: C.amber, borderWidth: 1, paddingVertical: 10 }}>
           <Text style={{ color: '#fcd34d', fontSize: 12.5 }}>
-            ⏳ {pendingCount} offline change(s) queued — they sync automatically (exactly once).
+            {pendingCount} offline change(s) queued — they sync automatically (exactly once).
           </Text>
         </Card>
       )}
@@ -80,7 +80,7 @@ export default function FuelingScreen() {
         renderItem={({ item }) => <RequestCard request={item} onPress={() => router.push(`/request/${item.id}`)} />}
         ListEmptyComponent={(
           <EmptyState
-            icon="🚚"
+            icon="clipboard-text-outline"
             title={dq ? 'No matching authorized requests' : 'No authorized requests waiting'}
             message={dq
               ? 'Try another plate or request number.'

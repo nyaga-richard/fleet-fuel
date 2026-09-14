@@ -1,14 +1,21 @@
 import { Tabs } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform, Keyboard, StyleSheet, Text } from 'react-native';
+import { Platform, Keyboard, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, TABBAR_CONTENT_H } from '../../theme';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { C, TABBAR_CONTENT_H, ICON } from '../../theme';
 
 // Bottom navigation (spec §9): compact, content-height 56 + the REAL
 // safe-area inset — never covered by gesture bar / 3-button nav / home
 // indicator. Hides while the keyboard is open (spec §11).
-function TabIcon({ glyph, focused }) {
-  return <Text style={{ fontSize: 17, color: focused ? C.accent2 : C.muted }}>{glyph}</Text>;
+function TabIcon({ name, focused }) {
+  return (
+    <MaterialCommunityIcons
+      name={name}
+      size={ICON.lg}
+      color={focused ? C.accent2 : C.muted}
+    />
+  );
 }
 
 export default function TabsLayout() {
@@ -41,10 +48,11 @@ export default function TabsLayout() {
         },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: ({ focused }) => <TabIcon glyph="⛽" focused={focused} /> }} />
-      <Tabs.Screen name="requests" options={{ title: 'Requests', tabBarIcon: ({ focused }) => <TabIcon glyph="📝" focused={focused} /> }} />
-      <Tabs.Screen name="issue" options={{ title: 'Fueling', tabBarIcon: ({ focused }) => <TabIcon glyph="🚚" focused={focused} /> }} />
-      <Tabs.Screen name="sync" options={{ title: 'Sync', tabBarIcon: ({ focused }) => <TabIcon glyph="🔄" focused={focused} /> }} />
+      <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: ({ focused }) => <TabIcon name="view-dashboard-outline" focused={focused} /> }} />
+      <Tabs.Screen name="requests" options={{ title: 'Requests', tabBarIcon: ({ focused }) => <TabIcon name="clipboard-text-outline" focused={focused} /> }} />
+      <Tabs.Screen name="issue" options={{ title: 'Fueling', tabBarIcon: ({ focused }) => <TabIcon name="gas-station" focused={focused} /> }} />
+      <Tabs.Screen name="sync" options={{ title: 'Sync', tabBarIcon: ({ focused }) => <TabIcon name="sync" focused={focused} /> }} />
+      <Tabs.Screen name="alerts" options={{ title: 'Alerts', tabBarIcon: ({ focused }) => <TabIcon name="bell-outline" focused={focused} /> }} />
     </Tabs>
   );
 }

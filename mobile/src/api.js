@@ -71,4 +71,10 @@ export const api = {
   pushBatch: (deviceId, ops) =>
     request('/api/sync/batch', { method: 'POST', body: { device_id: deviceId, ops } }),
   stock: () => request('/api/inventory/stock'),
+  notifications: (limit = 100) => request(`/api/notifications?limit=${limit}`),
+  markNotificationRead: (id) => request(`/api/notifications/${id}/read`, { method: 'PATCH', body: {} }),
+  markAllNotificationsRead: () => request('/api/notifications/read-all', { method: 'PATCH', body: {} }),
+  approvals: (status = 'PENDING') => request(`/api/approvals?status=${status}`),
+  decideApproval: (id, decision, reason) =>
+    request(`/api/approvals/${id}/${decision.toLowerCase()}`, { method: 'POST', body: reason ? { reason } : {} }),
 };
