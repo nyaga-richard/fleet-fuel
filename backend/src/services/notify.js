@@ -6,6 +6,7 @@
 // commits atomically with the business change (§46).
 // ============================================================================
 import { pool } from '../db/pool.js';
+import { queuePush } from './push.js';
 
 /**
  * create(client, { userId, type, title, message, entityType, entityId,
@@ -32,7 +33,20 @@ export async function notify(client, n) {
       n.severity ?? 'INFO', n.metadata ? JSON.stringify(n.metadata) : null,
       n.dedupKey ?? null, n.expiresAt ?? null],
   );
-  return rows[0]?.id ?? null; // null = duplicate, intentionally silent (§39)
+  const id = rows[0]?.id ?? null; // null = duplicate, intentionally silent (§39)
+  // §40 — push is the doorbell, the row is the record. Queue only when a row
+  // was created (deduped/pref-muted notifications never ring). Inside a tx the
+  // queue is flushed after commit (app.js response-finish), so a rollback can
+  // never send a phantom push.
+  if (id && n.push !== false) {
+    queuePush({
+      userId: n.userId,
+      title: n.title,
+      body: n.message ?? '',
+      data: { entity_type: n.entityType ?? null, entity_id: n.entityId ?? null, ...(n.metadata || {}) },
+    });
+  }
+  return id;
 }
 
 /** Notify every active user holding one of the given roles. */

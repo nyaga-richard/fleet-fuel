@@ -432,3 +432,31 @@ test('§37 notification preferences round-trip with validation', async () => {
   const bad = await api('PUT', '/api/notifications/preferences', { preferences: [1, 2] });
   assert.equal(bad.status, 400, 'non-object preferences rejected');
 });
+
+test('§40 push wiring never breaks approvals (best-effort delivery)', async () => {
+  // register a device whose token will never be deliverable
+  const reg = await api('POST', '/api/devices', { device_id: 'e2e-push-dev', platform: 'android', push_token: 'ExponentPushToken[e2e-invalid-token]' });
+  assert.equal(reg.status, 200);
+  // full adjustment approval cycle must still work end to end
+  const st0 = await api('GET', '/api/inventory/stock');
+  const before = st0.json.tanks?.[0]?.balance ?? st0.json.stock?.[0]?.balance;
+  const adj = await api('POST', '/api/inventory/adjustments', {
+    tank_id: tank.id, fuel_type_id: diesel.id, quantity: -1.5, reason: 'push-wiring e2e',
+    client_uuid: uuid(),
+  });
+  assert.ok([200, 202].includes(adj.status), 'adjustment accepted');
+  if (adj.status === 202) {
+    // admin requested → a MANAGER must decide (self-approval stays blocked §27)
+    const mgr = await api('POST', '/api/users', { name: 'Push Manager', email: `push-${uuid().slice(0, 8)}@test.local`, password: 'Manager123!', role: 'manager' });
+    const mlogin = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: mgr.json.user.email, password: 'Manager123!' }) });
+    const mtok = (await mlogin.json()).token;
+    const ap = await fetch(`${BASE}/api/approvals/${adj.json.approval_id}/approve`, { method: 'POST', headers: { authorization: `Bearer ${mtok}`, 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(ap.status, 200, 'approval decision works with push wired');
+  }
+  const st1 = await api('GET', '/api/inventory/stock');
+  const after = st1.json.tanks?.[0]?.balance ?? st1.json.stock?.[0]?.balance;
+  assert.equal(Number(after), Number(before) - 1.5, 'stock moved exactly by approved amount');
+  // device list still consistent (upsert, no dup)
+  const list = await api('GET', '/api/devices');
+  assert.equal(list.json.devices.filter((d) => d.device_id === 'e2e-push-dev').length, 1);
+});

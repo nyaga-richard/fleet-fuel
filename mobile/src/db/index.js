@@ -85,6 +85,11 @@ export async function initDb() {
       severity TEXT, entity_type TEXT, entity_id TEXT,
       is_read INTEGER DEFAULT 0, created_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS ledger_cache (
+      cache_key  TEXT PRIMARY KEY,
+      data       TEXT NOT NULL,
+      fetched_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS transactions (
       id TEXT PRIMARY KEY, txn_no TEXT, request_id TEXT, vehicle_id TEXT, plate TEXT,
       fuel_type_id TEXT, quantity REAL, status TEXT, created_at TEXT, updated_at TEXT
@@ -276,6 +281,22 @@ export async function replaceReferenceData(pull) {
 }
 
 // ── Notifications cache (server is authority; this is the offline view) ──────
+// ── Fuel Ledger cache (§20/§39): last server answer per filter combination,
+// so the ledger screen works offline exactly like the rest of the app. ────────
+export async function saveLedgerCache(cacheKey, dataset) {
+  await db.runAsync(
+    `INSERT INTO ledger_cache (cache_key, data, fetched_at) VALUES (?, ?, ?)
+     ON CONFLICT(cache_key) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at`,
+    [cacheKey, JSON.stringify(dataset), new Date().toISOString()],
+  );
+}
+
+export async function loadLedgerCache(cacheKey) {
+  const row = await db.getFirstAsync('SELECT data, fetched_at FROM ledger_cache WHERE cache_key = ?', [cacheKey]);
+  if (!row) return null;
+  try { return { dataset: JSON.parse(row.data), fetched_at: row.fetched_at }; } catch { return null; }
+}
+
 export async function replaceNotifications(rows) {
   await dbReady();
   await db.runAsync('DELETE FROM notifications');

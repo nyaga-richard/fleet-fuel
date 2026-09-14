@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 import { api, setUnauthorizedHandler } from './api';
 import { kvGet, kvSet, kvRemove } from './db';
 import { fullSync } from './sync';
+import { registerPushToken } from './push';
 
 const AuthCtx = createContext({ ready: false, user: null, login: async () => {}, logout: async () => {} });
 
@@ -40,6 +41,7 @@ export function AuthProvider({ children }) {
           await kvRemove('user');
         }
       } catch { /* fresh install */ }
+      registerPushToken(); // session restored — keep this device registered (§40)
       setReady(true);
     })();
   }, []);
@@ -67,6 +69,7 @@ export function AuthProvider({ children }) {
     await kvRemove('session_notice');
     setUser(res.user);
     fullSync().catch(() => {}); // background refresh, never blocks sign-in
+    registerPushToken(); // §40 — best effort; a build (not Expo Go) is required for real delivery
     return res.user;
   }, []);
 

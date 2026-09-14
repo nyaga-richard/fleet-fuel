@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../src/auth';
 import { startAutoSync } from '../src/sync';
+import { configurePushHandling } from '../src/push';
 import { api } from '../src/api';
 import { C } from '../theme';
 
@@ -41,6 +42,15 @@ function Bootstrap() {
     });
     return () => sub.remove();
   }, [user]);
+
+  // §40 — push taps deep-link into the entity (approvals → Approvals screen).
+  useEffect(() => {
+    const sub = configurePushHandling((d) => {
+      if (d?.entity_type === 'approval') router.push('/approvals');
+      else if (d?.entity_type === 'fuel_request' && d?.entity_id) router.push(`/request/${d.entity_id}`);
+    });
+    return () => sub?.remove?.();
+  }, [router]);
 
   // Startup splash (spec §7): never render protected screens before the
   // stored session has been evaluated.

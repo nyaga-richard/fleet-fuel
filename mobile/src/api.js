@@ -72,6 +72,14 @@ export const api = {
     request('/api/sync/batch', { method: 'POST', body: { device_id: deviceId, ops } }),
   stock: () => request('/api/inventory/stock'),
   notifications: (limit = 100) => request(`/api/notifications?limit=${limit}`),
+  registerDevice: (payload) => request('/api/devices', { method: 'POST', body: payload }),
+  // Hermes has no URLSearchParams — build the query string by hand.
+  ledgerReport: (params = {}) => {
+    const parts = Object.entries(params)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+    return request(`/api/reports/fuel-ledger${parts.length ? '?' + parts.join('&') : ''}`);
+  },
   markNotificationRead: (id) => request(`/api/notifications/${id}/read`, { method: 'PATCH', body: {} }),
   markAllNotificationsRead: () => request('/api/notifications/read-all', { method: 'PATCH', body: {} }),
   approvals: (status = 'PENDING') => request(`/api/approvals?status=${status}`),

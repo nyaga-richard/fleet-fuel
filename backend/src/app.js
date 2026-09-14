@@ -21,6 +21,7 @@ import reportsRoutes from './routes/reports.js';
 import notificationsRoutes from './routes/notifications.js';
 import approvalsRoutes from './routes/approvals.js';
 import devicesRoutes from './routes/devices.js';
+import { flushPushes } from './services/push.js';
 
 export function createApp() {
   const app = express();
@@ -50,6 +51,10 @@ export function createApp() {
     }
     next();
   });
+
+  // §40 — queued pushes flush once the response finishes: the transaction
+  // behind it has committed by then, so a rollback can never send a phantom push.
+  app.use((_req, res, next) => { res.on('finish', () => { flushPushes().catch(() => {}); }); next(); });
 
   app.use('/api/health', healthRoutes);
   app.use('/api/auth', authRoutes);

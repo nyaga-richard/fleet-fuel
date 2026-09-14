@@ -7,7 +7,7 @@
 //   • Clicking a row drills into the source entry (§17).
 import { useCallback, useEffect, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, SearchInput, Field, StatusPill, Skeleton, Stat, SearchableSelect, ExportMenu, Drawer } from '@/components/ui';
+import { Card, PageHeader, SearchInput, Field, StatusPill, Skeleton, Stat, SearchableSelect, ExportMenu, Drawer, Notice } from '@/components/ui';
 import { api } from '@/lib/api';
 import { fmtQty, fmtDateTime, fmtKES } from '@/lib/format';
 
@@ -38,6 +38,7 @@ function Ledger() {
   const [fuels, setFuels] = useState([]);
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState(null);
+  const [error, setError] = useState('');
 
   useEffect(() => { const t = setTimeout(() => setDebouncedQ(q), 300); return () => clearTimeout(t); }, [q]);
 
@@ -53,11 +54,13 @@ function Ledger() {
   };
 
   const load = useCallback(async () => {
-    setBusy(true);
+    setBusy(true); setError('');
     try {
       const qs = new URLSearchParams({ ...Object.fromEntries(Object.entries(params).filter(([, v]) => v)), page: String(page), pageSize: String(pageSize) });
       setData(await api('/api/reports/fuel-ledger?' + qs.toString()));
-    } catch { setData(null); }
+    } catch (e) {
+      setError(e?.message || 'Could not load the ledger.');
+    }
     finally { setBusy(false); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to, fuelTypeId, entryType, debouncedQ, page, pageSize]);
@@ -68,8 +71,10 @@ function Ledger() {
   const summary = data?.summary || [];
   const total = data?.total || 0;
   const pages = Math.max(1, Math.ceil(total / pageSize));
-  const from1 = total === 0 ? 0 : (data.page - 1) * data.pageSize + 1;
-  const to1 = Math.min(total, data.page * data.pageSize);
+  const page0 = data?.page ?? page;
+  const pageSize0 = data?.pageSize ?? pageSize;
+  const from1 = total === 0 ? 0 : (page0 - 1) * pageSize0 + 1;
+  const to1 = Math.min(total, page0 * pageSize0);
 
   return (
     <>
@@ -104,6 +109,12 @@ function Ledger() {
           <SearchInput value={q} onChange={setQ} placeholder="Search reference, particulars, vehicle…" width={320} />
         </div>
 
+        {error && (
+          <div style={{ margin: '10px 0', display: 'flex', gap: 10, alignItems: 'center' }}>
+            <Notice kind="error">{error}{data ? ' Showing the last successfully loaded view.' : ''}</Notice>
+            <button className="btn secondary sm" onClick={load}>Try again</button>
+          </div>
+        )}
         {!data ? <Skeleton lines={10} /> : (
           <>
             <div className="dt-tablewrap">

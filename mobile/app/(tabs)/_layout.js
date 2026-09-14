@@ -53,6 +53,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="issue" options={{ title: 'Fueling', tabBarIcon: ({ focused }) => <TabIcon name="gas-station" focused={focused} /> }} />
       <Tabs.Screen name="sync" options={{ title: 'Sync', tabBarIcon: ({ focused }) => <TabIcon name="sync" focused={focused} /> }} />
       <Tabs.Screen name="alerts" options={{ title: 'Alerts', tabBarIcon: ({ focused }) => <TabIcon name="bell-outline" focused={focused} /> }} />
+      <Tabs.Screen name="ledger" options={{ title: 'Ledger', tabBarIcon: ({ focused }) => <TabIcon name="book-open-variant" focused={focused} /> }} />
     </Tabs>
   );
 }
