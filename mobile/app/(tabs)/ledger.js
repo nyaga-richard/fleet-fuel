@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, FlatList, RefreshControl, ScrollView, TouchableOpacity } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
-  Screen, ScreenHeader, Card, Btn, EmptyState, OfflineBanner, SearchBar, SelectField,
+  Screen, ScreenHeader, Card, Btn, EmptyState, OfflineBanner, SearchBar, SelectField, FilterBar,
   useNetState, useDebounced, useTabBarPad,
 } from '../../src/components';
 import { api } from '../../src/api';
@@ -22,19 +22,17 @@ const ENTRY_TYPES = [
   { value: 'transfer', label: 'Transfer' },
 ];
 
-function monthStart() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
-}
-function todayISO() {
-  const d = new Date();
+function iso(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+function monthStart() { return iso(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); }
+function todayISO() { return iso(new Date()); }
 
-// Fuel Ledger on mobile (§13/§19/§20) — the SAME server dataset and running
-// balance as the web screen (§45). Filters are combinable; the last server
-// answer per filter set is cached in SQLite so the book of record stays
-// readable offline. Amounts are KES, dates DD/MM/YYYY, 24-hour (§19/§42).
+// Fuel Ledger (§11–§14) — ONE scrolling surface: search stays visible, filters
+// collapse behind [Filters], summary chips compress to a single row, and the
+// entries list owns the rest of the screen (FlatList header/footer pattern).
+// Same server dataset + server-side running balance as web (§45); per-filter
+// SQLite cache keeps it readable offline (§39) — never invented numbers.
 export default function LedgerScreen() {
   const net = useNetState();
   const [from, setFrom] = useState(monthStart());
@@ -68,24 +66,20 @@ export default function LedgerScreen() {
         saveLedgerCache(cacheKey, ds).catch(() => {});
         setBusy(false);
         return;
-      } catch (e) {
-        setError(e.message);
-      }
+      } catch (e) { setError(e.message); }
     }
-    // Offline or fetch failed → last cached answer for THESE filters (§39).
     const hit = await loadLedgerCache(cacheKey).catch(() => null);
-    if (hit) { setData(hit.dataset); setCacheInfo(hit.fetched_at); } else if (!net.isConnected) {
-      setError('Offline and no saved ledger for these filters yet — connect once to cache it.');
-    }
+    if (hit) { setData(hit.dataset); setCacheInfo(hit.fetched_at); }
+    else if (!net.isConnected) setError('Offline and no saved ledger for these filters yet — connect once to cache it.');
     setBusy(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to, fuelTypeId, entryType, dq, page, cacheKey, net.isConnected]);
 
   useFocusEffect(useCallback(() => { load(page); }, [load])); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function applyPage(p) {
-    setPage(p);
-    load(p);
+  function applyPage(p) { setPage(p); load(p); }
+  function resetFilters() {
+    setQ(''); setFrom(monthStart()); setTo(todayISO()); setFuelTypeId(''); setEntryType(''); setPage(1);
   }
 
   const total = data?.total || 0;
@@ -94,84 +88,90 @@ export default function LedgerScreen() {
   const from1 = total === 0 ? 0 : (page0 - 1) * (data?.pageSize ?? pageSize) + 1;
   const to1 = Math.min(total, page0 * (data?.pageSize ?? pageSize));
 
+  const filterCount = (fuelTypeId ? 1 : 0) + (entryType ? 1 : 0);
+  const fuelName = fuels.find((f) => f.id === fuelTypeId)?.name;
+  const filterSummary = [fuelName, entryType ? ENTRY_TYPES.find((t) => t.value === entryType)?.label : null]
+    .filter(Boolean).join(' · ') || null;
+
+  const summary = (data?.summary || []).slice(0, 8);
+
   return (
     <Screen>
       <ScreenHeader title="Fuel Ledger" subtitle="The book of record — every movement" />
 
-      {!net.isConnected && <OfflineBanner lastSync={null} />}
-      {cacheInfo && (
-        <Card style={{ marginBottom: SP.md }}>
-          <Text style={{ color: '#fcd34d', fontSize: 12 }}>
-            Offline — showing the ledger as cached {fmtDateTime(cacheInfo)}. Running balances are exactly as the server calculated them.
-          </Text>
-        </Card>
-      )}
-      {!!error && (
-        <Card style={{ borderColor: C.red, borderWidth: 1, marginBottom: SP.md }}>
-          <Text style={{ color: C.red, fontSize: 12.5 }}>{error}</Text>
-        </Card>
-      )}
-
-      <Card style={{ marginBottom: SP.md }}>
-        <View style={{ flexDirection: 'row', gap: SP.md }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: C.muted, fontSize: 11.5, marginBottom: 4 }}>From</Text>
-            <SearchBar value={from} onChange={(v) => { setFrom(v); setPage(1); }} placeholder="YYYY-MM-DD" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: C.muted, fontSize: 11.5, marginBottom: 4 }}>To</Text>
-            <SearchBar value={to} onChange={(v) => { setTo(v); setPage(1); }} placeholder="YYYY-MM-DD" />
-          </View>
-        </View>
-        <View style={{ height: SP.md }} />
-        <SelectField
-          label="Fuel type" placeholder="All fuel types" value={fuelTypeId}
-          onChange={(v) => { setFuelTypeId(v || ''); setPage(1); }}
-          options={[{ value: '', label: 'All fuel types' }, ...fuels.map((f) => ({ value: f.id, label: f.name, sub: f.code || '' }))]}
-        />
-        <View style={{ height: SP.md }} />
-        <SelectField
-          label="Transaction type" placeholder="All transactions" value={entryType}
-          onChange={(v) => { setEntryType(v || ''); setPage(1); }}
-          options={ENTRY_TYPES}
-        />
-        <View style={{ height: SP.md }} />
-        <SearchBar value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Search reference, particulars, vehicle…" />
-        {dq ? (
-          <TouchableOpacity onPress={() => { setQ(''); setFrom(monthStart()); setTo(todayISO()); setFuelTypeId(''); setEntryType(''); setPage(1); }} accessibilityRole="button" accessibilityLabel="Reset filters" style={{ alignSelf: 'flex-end', padding: 6, marginTop: 6 }}>
-            <Text style={{ color: C.accent2, fontSize: 12 }}>Reset filters</Text>
-          </TouchableOpacity>
-        ) : null}
-      </Card>
-
-      {data?.summary?.length ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: SP.md }} contentContainerStyle={{ gap: SP.md }}>
-          {data.summary.slice(0, 8).map((sm) => (
-            <Card key={sm.label} style={{ minWidth: 118, marginRight: 0 }}>
-              <Text style={{ color: C.muted, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>{sm.label}</Text>
-              <Text style={{ color: C.text, fontSize: 15, fontWeight: '800', marginTop: 3 }}>{sm.value}</Text>
-            </Card>
-          ))}
-        </ScrollView>
-      ) : null}
-
       <FlatList
         data={data?.rows || []}
         keyExtractor={(item) => item.id}
+        ListHeaderComponent={(
+          <View>
+            {!net.isConnected && <OfflineBanner lastSync={null} />}
+            {cacheInfo && (
+              <Card style={{ marginBottom: SP.md }}>
+                <Text style={{ color: '#fcd34d', fontSize: 12 }}>
+                  Offline — ledger as cached {fmtDateTime(cacheInfo)}. Balances are exactly as the server calculated them.
+                </Text>
+              </Card>
+            )}
+            {!!error && (
+              <Card style={{ borderColor: C.red, borderWidth: 1, marginBottom: SP.md }}>
+                <Text style={{ color: C.red, fontSize: 12.5 }}>{error}</Text>
+              </Card>
+            )}
+
+            <View style={{ marginBottom: SP.md }}>
+              <SearchBar value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Search reference, particulars, vehicle…" />
+            </View>
+
+            <FilterBar summary={filterSummary} count={filterCount}>
+              <Text style={{ color: C.muted, fontSize: 11.5, marginBottom: 4 }}>From</Text>
+              <SearchBar value={from} onChange={(v) => { setFrom(v); setPage(1); }} placeholder="YYYY-MM-DD" />
+              <View style={{ height: SP.md }} />
+              <Text style={{ color: C.muted, fontSize: 11.5, marginBottom: 4 }}>To</Text>
+              <SearchBar value={to} onChange={(v) => { setTo(v); setPage(1); }} placeholder="YYYY-MM-DD" />
+              <View style={{ height: SP.md }} />
+              <SelectField
+                label="Fuel type" placeholder="All fuel types" value={fuelTypeId}
+                onChange={(v) => { setFuelTypeId(v || ''); setPage(1); }}
+                options={[{ value: '', label: 'All fuel types' }, ...fuels.map((f) => ({ value: f.id, label: f.name, sub: f.code || '' }))]}
+              />
+              <View style={{ height: SP.md }} />
+              <SelectField
+                label="Transaction type" placeholder="All transactions" value={entryType}
+                onChange={(v) => { setEntryType(v || ''); setPage(1); }}
+                options={ENTRY_TYPES}
+              />
+              <View style={{ height: SP.md }} />
+              <Btn label="Apply" onPress={() => { setPage(1); load(1); }} />
+              <View style={{ height: SP.sm }} />
+              <Btn label="Reset filters" variant="secondary" onPress={resetFilters} />
+            </FilterBar>
+
+            {summary.length > 0 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: SP.sm }} contentContainerStyle={{ gap: SP.md, paddingRight: SP.md }}>
+                {summary.map((sm) => (
+                  <Card key={sm.label} style={{ minWidth: 112, marginBottom: 0 }}>
+                    <Text style={{ color: C.muted, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }} numberOfLines={1}>{sm.label}</Text>
+                    <Text style={{ color: C.text, fontSize: 14.5, fontWeight: '800', marginTop: 2 }} numberOfLines={1}>{sm.value}</Text>
+                  </Card>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        )}
         renderItem={({ item: r }) => (
           <Card style={{ marginBottom: SP.md }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: SP.sm }}>
               <Text style={{ color: C.muted, fontSize: 11.5, flex: 1 }}>{fmtDateTime(r.date)}</Text>
               <Text style={{ color: C.accent2, fontSize: 11.5, fontWeight: '700' }}>{r.reference}</Text>
             </View>
             <Text style={{ color: C.text, fontSize: 13, marginTop: 4 }} numberOfLines={2}>{r.particulars}</Text>
-            <View style={{ flexDirection: 'row', marginTop: 8, gap: SP.md }}>
+            <View style={{ flexDirection: 'row', marginTop: SP.sm, gap: SP.md }}>
               {!!r.qty_in && <Metric label="In" value={fmtQty(r.qty_in, '')} tone={C.green} />}
               {!!r.qty_out && <Metric label="Out" value={fmtQty(r.qty_out, '')} tone={C.amber} />}
               <Metric label="Balance" value={fmtQty(r.running_balance, '')} />
               {r.amount != null && <Metric label="Amount" value={fmtKES(r.amount)} />}
             </View>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: SP.sm }}>
               <Text style={{ color: C.muted, fontSize: 11 }}>{r.fuel_type}{r.raw_type ? ` · ${r.raw_type}` : ''}{r.status ? ` · ${r.status}` : ''}</Text>
               <Text style={{ color: C.muted, fontSize: 11 }}>{r.user || 'system'}</Text>
             </View>

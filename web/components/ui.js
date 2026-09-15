@@ -178,6 +178,33 @@ export function StatusPill({ status }) {
   );
 }
 
+// Collapsible filter bar (§36/§37): filters live inline on desktop; below
+// 940px they collapse behind a [Filters] toggle (closed by default) so the
+// data owns the screen. activeCount badges how many filters are applied.
+export function FilterBar({ children, activeCount = 0 }) {
+  const [closed, setClosed] = useState(true);
+  const [isSmall, setIsSmall] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 940px)');
+    setIsSmall(mq.matches);
+    const on = (e) => setIsSmall(e.matches);
+    mq.addEventListener?.('change', on);
+    return () => mq.removeEventListener?.('change', on);
+  }, []);
+  const hidden = isSmall && closed;
+  return (
+    <div className="fb">
+      {isSmall && (
+        <button type="button" className="fb-toggle" onClick={() => setClosed(!closed)} aria-expanded={!hidden}>
+          ⚙ Filters {activeCount > 0 && <span className="fb-count">{activeCount}</span>}
+          <span style={{ marginLeft: 'auto', opacity: .7 }}>{hidden ? '▾' : '×'}</span>
+        </button>
+      )}
+      <div className={'fb-body' + (hidden ? ' closed' : '')}>{children}</div>
+    </div>
+  );
+}
+
 export function Field({ label, children, hint }) {
   return (
     <label className="fld">

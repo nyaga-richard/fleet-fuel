@@ -51,59 +51,62 @@ export default function SyncScreen() {
         subtitle={state.syncing ? 'Syncing now…' : net.isConnected ? 'Online' : 'Offline — changes stay queued'}
       />
 
-      <Card>
-        <Text style={{ color: C.muted, fontSize: 12, marginBottom: SP.sm }}>
-          {lastSync ? `Last successful sync: ${fmtDateTime(lastSync)}` : 'Never synced on this device'}
-          {' · '}
-        </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <Icon name={net.isConnected ? 'cloud-check-outline' : 'cloud-off-outline'} size={ICON.sm} color={net.isConnected ? C.green : C.amber} />
-          <Text style={{ color: C.muted, fontSize: 12 }}>{net.isConnected ? 'online' : 'offline'}</Text>
-        </View>
-        <Text style={{ color: C.muted, fontSize: 12 }}>
-        </Text>
-        <View style={{ flexDirection: 'row', gap: SP.md }}>
-          <View style={[s.stat, { flex: 1 }]}>
-            <Text style={[s.statValue, { color: count > 0 ? C.amber : C.green }]}>{count}</Text>
-            <Text style={s.statLabel}>Pending</Text>
-          </View>
-          <View style={[s.stat, { flex: 1 }]}>
-            <Text style={[s.statValue, { color: failed > 0 ? C.red : C.green }]}>{failed}</Text>
-            <Text style={s.statLabel}>Failed</Text>
-          </View>
-        </View>
-        {state.message && !state.syncing && (
-          <Text style={{ color: state.ok && !state.held ? C.green : C.amber, fontSize: 12, marginTop: SP.sm }}>{state.message}</Text>
-        )}
-        <Btn label={busy ? 'Syncing…' : 'SYNC NOW'} onPress={syncNow} busy={busy} style={{ marginTop: SP.md }} />
-        {!net.isConnected && (
-          <Text style={{ color: '#fcd34d', fontSize: 12, marginTop: SP.sm }}>
-            You're offline. Everything you complete stays saved on this device and syncs when connectivity returns.
-          </Text>
-        )}
-      </Card>
-
-      {failed > 0 && (
-        <Card style={{ borderColor: C.red, borderWidth: 1 }}>
-          <Text style={{ color: C.red, fontSize: 13, fontWeight: '700' }}>{failed} item(s) failed to synchronize</Text>
-          <Text style={{ color: C.muted, fontSize: 12, marginVertical: 4 }}>
-            They are NEVER deleted automatically. The exact server reason is shown on each item below. Fix the cause (often empty tank stock — record a bulk receipt on the web console) then reset & retry.
-          </Text>
-          <Btn label="RESET & RETRY FAILED" icon="refresh" variant="warn" busy={busy} onPress={async () => { setBusy(true); await resetRetries(); await fullSync(); await load(); setBusy(false); }} />
-        </Card>
-      )}
-
-      <Card>
-        <Text style={s.metaLabel}>API URL</Text>
-        <Text style={s.mono}>{API_URL || 'NOT CONFIGURED (mobile/.env)'}</Text>
-        <Text style={[s.metaLabel, { marginTop: SP.sm }]}>Device ID</Text>
-        <Text style={s.mono}>{device || '—'}</Text>
-      </Card>
-
-      <SectionHeader>Offline queue</SectionHeader>
       <FlatList
         data={ops}
         keyExtractor={(item) => item.op_id}
+        ListHeaderComponent={(
+          <View>
+  <Card>
+          <Text style={{ color: C.muted, fontSize: 12, marginBottom: SP.sm }}>
+            {lastSync ? `Last successful sync: ${fmtDateTime(lastSync)}` : 'Never synced on this device'}
+            {' · '}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Icon name={net.isConnected ? 'cloud-check-outline' : 'cloud-off-outline'} size={ICON.sm} color={net.isConnected ? C.green : C.amber} />
+            <Text style={{ color: C.muted, fontSize: 12 }}>{net.isConnected ? 'online' : 'offline'}</Text>
+          </View>
+          <Text style={{ color: C.muted, fontSize: 12 }}>
+          </Text>
+          <View style={{ flexDirection: 'row', gap: SP.md }}>
+            <View style={[s.stat, { flex: 1 }]}>
+              <Text style={[s.statValue, { color: count > 0 ? C.amber : C.green }]}>{count}</Text>
+              <Text style={s.statLabel}>Pending</Text>
+            </View>
+            <View style={[s.stat, { flex: 1 }]}>
+              <Text style={[s.statValue, { color: failed > 0 ? C.red : C.green }]}>{failed}</Text>
+              <Text style={s.statLabel}>Failed</Text>
+            </View>
+          </View>
+          {state.message && !state.syncing && (
+            <Text style={{ color: state.ok && !state.held ? C.green : C.amber, fontSize: 12, marginTop: SP.sm }}>{state.message}</Text>
+          )}
+          <Btn label={busy ? 'Syncing…' : 'SYNC NOW'} onPress={syncNow} busy={busy} style={{ marginTop: SP.md }} />
+          {!net.isConnected && (
+            <Text style={{ color: '#fcd34d', fontSize: 12, marginTop: SP.sm }}>
+              You're offline. Everything you complete stays saved on this device and syncs when connectivity returns.
+            </Text>
+          )}
+        </Card>
+
+        {failed > 0 && (
+          <Card style={{ borderColor: C.red, borderWidth: 1 }}>
+            <Text style={{ color: C.red, fontSize: 13, fontWeight: '700' }}>{failed} item(s) failed to synchronize</Text>
+            <Text style={{ color: C.muted, fontSize: 12, marginVertical: 4 }}>
+              They are NEVER deleted automatically. The exact server reason is shown on each item below. Fix the cause (often empty tank stock — record a bulk receipt on the web console) then reset & retry.
+            </Text>
+            <Btn label="RESET & RETRY FAILED" icon="refresh" variant="warn" busy={busy} onPress={async () => { setBusy(true); await resetRetries(); await fullSync(); await load(); setBusy(false); }} />
+          </Card>
+        )}
+
+        <Card>
+          <Text style={s.metaLabel}>API URL</Text>
+          <Text style={s.mono}>{API_URL || 'NOT CONFIGURED (mobile/.env)'}</Text>
+          <Text style={[s.metaLabel, { marginTop: SP.sm }]}>Device ID</Text>
+          <Text style={s.mono}>{device || '—'}</Text>
+        </Card>
+            <SectionHeader>Offline queue</SectionHeader>
+          </View>
+        )}
         renderItem={({ item }) => (
           <Card>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>

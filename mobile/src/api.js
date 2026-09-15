@@ -83,6 +83,9 @@ export const api = {
   markNotificationRead: (id) => request(`/api/notifications/${id}/read`, { method: 'PATCH', body: {} }),
   markAllNotificationsRead: () => request('/api/notifications/read-all', { method: 'PATCH', body: {} }),
   approvals: (status = 'PENDING') => request(`/api/approvals?status=${status}`),
+  requests: (status) => request(`/api/requests${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  decideRequest: (id, decision, comments) =>
+    request(`/api/requests/${id}/${decision}`, { method: 'POST', body: comments ? { comments } : {} }),
   decideApproval: (id, decision, reason) =>
     request(`/api/approvals/${id}/${decision.toLowerCase()}`, { method: 'POST', body: reason ? { reason } : {} }),
 };

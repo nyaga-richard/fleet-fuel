@@ -284,6 +284,47 @@ export function FilterButton({ count, onPress }) {
 }
 
 // ── States ───────────────────────────────────────────────────────────────────
+// Collapsible filter container (§12/§13/§36): collapsed by default with a
+// one-line summary of active filters — data owns the screen, not the form.
+export function FilterBar({ summary, count = 0, children, style }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={[{ marginBottom: SP.md }, style]}>
+      <TouchableOpacity
+        onPress={() => setOpen(!open)}
+        accessibilityRole="button"
+        accessibilityLabel={(open ? 'Hide' : 'Show') + ` filters, ${count} active`}
+        style={{
+          flexDirection: 'row', alignItems: 'center', gap: SP.sm,
+          minHeight: BTN_H, paddingHorizontal: CARD_PAD, borderRadius: 14,
+          backgroundColor: C.panel, borderWidth: 1, borderColor: C.border,
+        }}
+      >
+        <Icon name="tune" size={ICON.md} color={C.accent2} />
+        <Text style={{ color: C.text, fontSize: 13, fontWeight: '700' }}>Filters</Text>
+        {count > 0 && (
+          <View style={{ backgroundColor: C.accent, borderRadius: 10, minWidth: 20, height: 20, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>{count}</Text>
+          </View>
+        )}
+        {!!summary && !open && (
+          <Text style={{ color: C.muted, fontSize: 12, flex: 1 }} numberOfLines={1}>{summary}</Text>
+        )}
+        <View style={{ flex: summary && !open ? 0 : 1 }} />
+        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={ICON.md} color={C.muted} />
+      </TouchableOpacity>
+      {open && (
+        <View style={{
+          marginTop: SP.sm, padding: CARD_PAD, borderRadius: 14,
+          backgroundColor: C.panel, borderWidth: 1, borderColor: C.border,
+        }}>
+          {children}
+        </View>
+      )}
+    </View>
+  );
+}
+
 export function EmptyState({ icon = 'circle-outline', title, message, action }) {
   return (
     <View style={styles.empty}>

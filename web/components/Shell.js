@@ -14,20 +14,26 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 
+// Navigation IA (§22/§26): five logical groups, role-filtered. The Fuel
+// Requests badge (§28) is the only nav badge — it IS pending work.
 const NAV = [
   { group: 'Overview', links: [
     { href: '/', label: 'Dashboard', roles: ['admin', 'manager', 'attendant'], icon: 'dash' },
-    { href: '/ledger', label: 'Fuel Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'book' },
-    { href: '/vehicle-ledger', label: 'Vehicle Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },
-    { href: '/reports', label: 'Reports', roles: ['admin', 'manager'], icon: 'book' },
   ]},
   { group: 'Operations', links: [
-    { href: '/requests', label: 'Fuel Requests', roles: ['admin', 'manager', 'attendant'], icon: 'file' },
+    { href: '/requests', label: 'Fuel Requests', roles: ['admin', 'manager', 'attendant'], icon: 'file', badge: 'requests' },
     { href: '/issue', label: 'Issue Fuel', roles: ['admin', 'manager', 'attendant'], icon: 'drop' },
+    { href: '/vehicles', label: 'Vehicles', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },
+  ]},
+  { group: 'Inventory', links: [
+    { href: '/ledger', label: 'Fuel Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'book' },
+    { href: '/vehicle-ledger', label: 'Vehicle Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },
     { href: '/inventory', label: 'Inventory', roles: ['admin', 'manager', 'attendant'], icon: 'box' },
   ]},
-  { group: 'Administration', links: [
-    { href: '/vehicles', label: 'Vehicles', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },
+  { group: 'Reports', links: [
+    { href: '/reports', label: 'Reports', roles: ['admin', 'manager'], icon: 'file' },
+  ]},
+  { group: 'System', links: [
     { href: '/configuration', label: 'Configuration', roles: ['admin', 'manager'], icon: 'sliders' },
     { href: '/users', label: 'Users', roles: ['admin'], icon: 'users' },
     { href: '/system', label: 'System', roles: ['admin', 'manager', 'attendant'], icon: 'chip' },
@@ -107,6 +113,7 @@ export default function Shell({ children }) {
             <Link key={l.href} href={l.href} className={pathname === l.href ? 'active' : ''} title={l.label}>
               <Icon name={l.icon} />
               <span className="nav-label">{l.label}</span>
+              {l.badge === 'requests' && isDecider && alerts > 0 && <span className="nav-badge" aria-label={`${alerts} pending requests`}>{alerts > 99 ? '99+' : alerts}</span>}
             </Link>
           ))}
         </div>
@@ -149,6 +156,15 @@ export default function Shell({ children }) {
           </div>
         </div>
       )}
+
+      {/* Mobile bottom navigation (§4): primary destinations; More opens the drawer */}
+      <nav className="mobilenav" aria-label="Primary">
+        <Link href="/" className={pathname === '/' ? 'active' : ''}>Home</Link>
+        <Link href="/requests" className={pathname === '/requests' ? 'active' : ''}>Requests{isDecider && alerts > 0 ? ` (${alerts})` : ''}</Link>
+        <Link href="/issue" className={pathname === '/issue' ? 'active' : ''}>Fueling</Link>
+        <Link href="/ledger" className={pathname === '/ledger' ? 'active' : ''}>Ledger</Link>
+        <button type="button" onClick={() => setDrawer(true)} aria-label="More menu">More</button>
+      </nav>
 
       <main className="main">
         <div className="page-head desktop-only">

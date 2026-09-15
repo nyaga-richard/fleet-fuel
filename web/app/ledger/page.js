@@ -7,7 +7,7 @@
 //   • Clicking a row drills into the source entry (§17).
 import { useCallback, useEffect, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, SearchInput, Field, StatusPill, Skeleton, Stat, SearchableSelect, ExportMenu, Drawer, Notice } from '@/components/ui';
+import { Card, PageHeader, SearchInput, Field, StatusPill, Skeleton, Stat, SearchableSelect, ExportMenu, Drawer, Notice, FilterBar } from '@/components/ui';
 import { api } from '@/lib/api';
 import { fmtQty, fmtDateTime, fmtKES } from '@/lib/format';
 
@@ -88,7 +88,11 @@ function Ledger() {
         {summary.map((s) => <Stat key={s.label} label={s.label} value={s.value} />)}
       </div>
 
-      <Card>
+      <div style={{ marginBottom: 12 }}>
+        <SearchInput value={q} onChange={setQ} placeholder="Search reference, particulars, vehicle…" width={320} />
+      </div>
+
+      <FilterBar activeCount={(fuelTypeId ? 1 : 0) + (entryType ? 1 : 0)}>
         <div className="frow">
           <Field label="Date from"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></Field>
           <Field label="Date to"><input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
@@ -105,61 +109,60 @@ function Ledger() {
             />
           </Field>
         </div>
-        <div style={{ marginBottom: 12 }}>
-          <SearchInput value={q} onChange={setQ} placeholder="Search reference, particulars, vehicle…" width={320} />
-        </div>
+      </FilterBar>
 
-        {error && (
-          <div style={{ margin: '10px 0', display: 'flex', gap: 10, alignItems: 'center' }}>
-            <Notice kind="error">{error}{data ? ' Showing the last successfully loaded view.' : ''}</Notice>
-            <button className="btn secondary sm" onClick={load}>Try again</button>
-          </div>
-        )}
-        {!data ? <Skeleton lines={10} /> : (
-          <>
-            <div className="dt-tablewrap">
-              <table className="tbl sticky">
-                <thead>
-                  <tr>
-                    <th>Date</th><th>Reference</th><th>Particulars</th><th>Fuel</th><th>Type</th>
-                    <th className="num">Qty In</th><th className="num">Qty Out</th><th className="num">Running</th>
-                    <th className="num">Amount</th><th>Vehicle</th><th>Tank</th><th>User</th><th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.rows.length === 0 && (
-                    <tr><td colSpan={13} className="muted" style={{ textAlign: 'center', padding: 24 }}>
-                      No ledger entries in this period for the selected filters.
-                    </td></tr>
-                  )}
-                  {data.rows.map((r) => (
-                    <tr key={r.id} className="clickable" onClick={() => setDetail(r)}>
-                      <td className="nowrap">{fmtDateTime(r.date)}</td>
-                      <td className="mono">{r.reference}</td>
-                      <td className="wrap" style={{ maxWidth: 260 }}>{r.particulars}</td>
-                      <td>{r.fuel_type}</td>
-                      <td><StatusPill status={r.raw_type} /></td>
-                      <td className="num pos">{r.qty_in ? fmtQty(r.qty_in, '') : ''}</td>
-                      <td className="num neg">{r.qty_out ? fmtQty(r.qty_out, '') : ''}</td>
-                      <td className="num" style={{ fontWeight: 700 }}>{fmtQty(r.running_balance, '')}</td>
-                      <td className="num">{r.amount != null ? fmtKES(r.amount) : '—'}</td>
-                      <td>{r.vehicle || '—'}</td>
-                      <td>{r.tank || '—'}</td>
-                      <td>{r.user || 'system'}</td>
-                      <td><StatusPill status={r.status} /></td>
+      <Card>
+          {error && (
+            <div style={{ margin: '10px 0', display: 'flex', gap: 10, alignItems: 'center' }}>
+              <Notice kind="error">{error}{data ? ' Showing the last successfully loaded view.' : ''}</Notice>
+              <button className="btn secondary sm" onClick={load}>Try again</button>
+            </div>
+          )}
+          {!data ? <Skeleton lines={10} /> : (
+            <>
+              <div className="dt-tablewrap">
+                <table className="tbl sticky">
+                  <thead>
+                    <tr>
+                      <th>Date</th><th>Reference</th><th>Particulars</th><th>Fuel</th><th>Type</th>
+                      <th className="num">Qty In</th><th className="num">Qty Out</th><th className="num">Running</th>
+                      <th className="num">Amount</th><th>Vehicle</th><th>Tank</th><th>User</th><th>Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {data.rows.length === 0 && (
+                      <tr><td colSpan={13} className="muted" style={{ textAlign: 'center', padding: 24 }}>
+                        No ledger entries in this period for the selected filters.
+                      </td></tr>
+                    )}
+                    {data.rows.map((r) => (
+                      <tr key={r.id} className="clickable" onClick={() => setDetail(r)}>
+                        <td className="nowrap">{fmtDateTime(r.date)}</td>
+                        <td className="mono">{r.reference}</td>
+                        <td className="wrap" style={{ maxWidth: 260 }}>{r.particulars}</td>
+                        <td>{r.fuel_type}</td>
+                        <td><StatusPill status={r.raw_type} /></td>
+                        <td className="num pos">{r.qty_in ? fmtQty(r.qty_in, '') : ''}</td>
+                        <td className="num neg">{r.qty_out ? fmtQty(r.qty_out, '') : ''}</td>
+                        <td className="num" style={{ fontWeight: 700 }}>{fmtQty(r.running_balance, '')}</td>
+                        <td className="num">{r.amount != null ? fmtKES(r.amount) : '—'}</td>
+                        <td>{r.vehicle || '—'}</td>
+                        <td>{r.tank || '—'}</td>
+                        <td>{r.user || 'system'}</td>
+                        <td><StatusPill status={r.status} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-            <div className="pager">
-              <button className="btn secondary sm" disabled={page <= 1 || busy} onClick={() => setPage(page - 1)}>← Previous</button>
-              <span className="muted">Showing {from1.toLocaleString()}–{to1.toLocaleString()} of {total.toLocaleString()}</span>
-              <button className="btn secondary sm" disabled={page >= pages || busy} onClick={() => setPage(page + 1)}>Next →</button>
-            </div>
-          </>
-        )}
+              <div className="pager">
+                <button className="btn secondary sm" disabled={page <= 1 || busy} onClick={() => setPage(page - 1)}>← Previous</button>
+                <span className="muted">Showing {from1.toLocaleString()}–{to1.toLocaleString()} of {total.toLocaleString()}</span>
+                <button className="btn secondary sm" disabled={page >= pages || busy} onClick={() => setPage(page + 1)}>Next →</button>
+              </div>
+            </>
+          )}
       </Card>
 
       <Drawer open={!!detail} onClose={() => setDetail(null)} title="Ledger entry" subtitle={detail?.reference}>

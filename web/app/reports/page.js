@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, ExportMenu, Field } from '@/components/ui';
+import { Card, ExportMenu, Field, FilterBar } from '@/components/ui';
 import { api } from '@/lib/api';
 import { fmtKES, fmtDateTime } from '@/lib/format';
 
@@ -68,7 +68,7 @@ function Reports() {
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
-      <Card>
+      <FilterBar>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <Field label="Date From"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></Field>
           <Field label="Date To"><input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
@@ -77,7 +77,7 @@ function Reports() {
             The range below is baked into every dated report you export here.
           </span>
         </div>
-      </Card>
+      </FilterBar>
 
       <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
         {list.map((r) => (

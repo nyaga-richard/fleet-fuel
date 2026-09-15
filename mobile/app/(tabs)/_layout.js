@@ -1,4 +1,5 @@
 import { Tabs } from 'expo-router';
+import { useAuth } from '../../src/auth';
 import { useEffect, useState } from 'react';
 import { Platform, Keyboard, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +21,9 @@ function TabIcon({ name, focused }) {
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  const isMgr = user?.role === 'manager' || user?.role === 'admin';
+  const hide = (cond) => (cond ? undefined : { href: null }); // §23: role-aware tabs
   const [kbOpen, setKbOpen] = useState(false);
 
   useEffect(() => {
@@ -51,9 +55,10 @@ export default function TabsLayout() {
       <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: ({ focused }) => <TabIcon name="view-dashboard-outline" focused={focused} /> }} />
       <Tabs.Screen name="requests" options={{ title: 'Requests', tabBarIcon: ({ focused }) => <TabIcon name="clipboard-text-outline" focused={focused} /> }} />
       <Tabs.Screen name="issue" options={{ title: 'Fueling', tabBarIcon: ({ focused }) => <TabIcon name="gas-station" focused={focused} /> }} />
-      <Tabs.Screen name="sync" options={{ title: 'Sync', tabBarIcon: ({ focused }) => <TabIcon name="sync" focused={focused} /> }} />
-      <Tabs.Screen name="alerts" options={{ title: 'Alerts', tabBarIcon: ({ focused }) => <TabIcon name="bell-outline" focused={focused} /> }} />
-      <Tabs.Screen name="ledger" options={{ title: 'Ledger', tabBarIcon: ({ focused }) => <TabIcon name="book-open-variant" focused={focused} /> }} />
+      <Tabs.Screen name="sync" options={{ ...hide(!isMgr), title: 'Sync', tabBarIcon: ({ focused }) => <TabIcon name="sync" focused={focused} /> }} />
+      <Tabs.Screen name="alerts" options={{ href: null }} />
+      <Tabs.Screen name="more" options={{ title: 'More', tabBarIcon: ({ focused }) => <TabIcon name="dots-horizontal" focused={focused} /> }} />
+      <Tabs.Screen name="ledger" options={{ ...hide(isMgr), title: 'Ledger', tabBarIcon: ({ focused }) => <TabIcon name="book-open-variant" focused={focused} /> }} />
     </Tabs>
   );
 }
