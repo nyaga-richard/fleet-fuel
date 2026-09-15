@@ -177,10 +177,26 @@ a:hover { text-decoration: underline; }
 
 .stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; min-width: 0; }
 .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
-.stat .value { font-size: 24px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.stat .value { font-size: 24px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; } overflow-wrap: anywhere;
 .stat .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
 .stat .bar { height: 5px; background: var(--panel-2); border-radius: 3px; margin-top: 10px; overflow: hidden; }
 .stat .bar > div { height: 100%; background: var(--accent); border-radius: 3px; }
+
+/* Card rows (ledger/vehicle-ledger summaries) + filter rows — fluid, wrap-safe */
+.cards4 {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px; margin-bottom: 18px; min-width: 0;
+}
+.frow { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-bottom: 12px; }
+.frow label.fld { flex: 1 1 170px; min-width: 150px; margin-bottom: 0; }
+.nowrap { white-space: nowrap; }
+.wrap { white-space: normal; word-break: break-word; }
+.gs-group { padding: 4px 0; border-bottom: 1px solid var(--border); }
+.gs-group:last-child { border-bottom: none; }
+.kv-row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.kv-row:last-child { border-bottom: none; }
+.kv-k { color: var(--muted); }
+.kv-v { text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 
 /* ── Tables ───────────────────────────────────────────────────────────────── */
 .dt { min-width: 0; }
@@ -383,6 +399,8 @@ button.btn + button.btn { margin-left: 8px; }
   .drawer { width: 100vw !important; border-left: none; }
   .tabs { gap: 5px; }
   .tabs button { padding: 7px 12px; }
+  .frow label.fld { flex: 1 1 100%; }
+  .cards4 { grid-template-columns: 1fr 1fr; }
 }
 
 

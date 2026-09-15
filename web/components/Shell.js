@@ -19,7 +19,6 @@ const NAV = [
     { href: '/', label: 'Dashboard', roles: ['admin', 'manager', 'attendant'], icon: 'dash' },
     { href: '/ledger', label: 'Fuel Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'book' },
     { href: '/vehicle-ledger', label: 'Vehicle Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },
-    { href: '/approvals', label: 'Approvals', roles: ['admin', 'manager'], icon: 'check' },
     { href: '/reports', label: 'Reports', roles: ['admin', 'manager'], icon: 'book' },
   ]},
   { group: 'Operations', links: [

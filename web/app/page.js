@@ -14,11 +14,10 @@ export default function DashboardPage() {
 
 function Dashboard() {
   const [data, setData] = useState(null);
-  const [pendingApprovals, setPendingApprovals] = useState('…');
+
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api('/api/approvals?status=PENDING').then((d) => setPendingApprovals(String(d.total ?? d.approvals?.length ?? 0))).catch(() => setPendingApprovals('—'));
   }, []);
   useEffect(() => {
     const from = new Date(Date.now() - 13 * 86400000).toISOString().slice(0, 10);
@@ -61,9 +60,6 @@ function Dashboard() {
       <div className="grid c4" style={{ marginBottom: 18 }}>
         {stock.map((s) => <StockCard key={s.id} s={s} tanks={tanks} />)}
         <Stat label="Issued today" value={fmtQty(issuedToday)} sub="all fuel types" tone="#60a5fa" />
-        <Link href="/approvals?status=PENDING" style={{ textDecoration: 'none' }}>
-          <Stat label="Pending approvals" value={pendingApprovals} sub="excess · adjustments · requests" tone={pendingApprovals > 0 ? '#f59e0b' : '#22c55e'} />
-        </Link>
         <Stat
           label="Pending requests"
           value={fmtNum(pending)}

@@ -185,6 +185,24 @@ function Requests() {
               { key: 'destination', label: 'Destination', render: (r) => r.destination || '—' },
               { key: 'requested_by_name', label: 'Requested by', render: (r) => r.requested_by_name || '—' },
               { key: 'status', label: 'Status', render: (r) => <StatusPill status={r.status} /> },
+              ...(canDecide ? [{
+                key: 'acts',
+                label: 'Actions',
+                render: (r) => r.status === 'pending' ? (
+                  <div className="row-actions">
+                    <button
+                      className="btn success sm"
+                      title="Authorize this request"
+                      onClick={(e) => { e.stopPropagation(); setConfirm({ action: 'approve', id: r.id, label: `Authorize ${r.request_no || 'this request'} for ${r.plate || 'vehicle'}?` }); }}
+                    >Approve</button>{' '}
+                    <button
+                      className="btn danger sm"
+                      title="Reject this request"
+                      onClick={(e) => { e.stopPropagation(); setConfirm({ action: 'reject', id: r.id, label: `Reject ${r.request_no || 'this request'}?` }); }}
+                    >Reject</button>
+                  </div>
+                ) : null,
+              }] : []),
             ]}
             rows={filtered}
             onRowClick={openDetails}
@@ -196,6 +214,12 @@ function Requests() {
                 </div>
                 <div style={{ margin: '5px 0 3px', fontWeight: 600 }}>{r.plate} · {fmtQty(r.quantity)} {r.fuel_type_name}</div>
                 <div className="muted" style={{ fontSize: 12 }}>{r.driver_name || '—'} · {fmtDateTime(r.created_at)}</div>
+                {canDecide && r.status === 'pending' && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button className="btn success sm" onClick={(e) => { e.stopPropagation(); setConfirm({ action: 'approve', id: r.id, label: `Authorize ${r.request_no || 'this request'}?` }); }}>Approve</button>
+                    <button className="btn danger sm" onClick={(e) => { e.stopPropagation(); setConfirm({ action: 'reject', id: r.id, label: `Reject ${r.request_no || 'this request'}?` }); }}>Reject</button>
+                  </div>
+                )}
               </>
             )}
             empty={q ? `No requests match “${q}”` : tab === 'pending' ? 'No pending requests — all clear' : 'No requests in this view'}
