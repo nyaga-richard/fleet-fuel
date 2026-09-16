@@ -5,6 +5,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { asyncH, bad, notFound } from '../middleware/errors.js';
 import { needStr, optUuid, isUuid } from '../middleware/validate.js';
 import { audit } from '../services/audit.js';
+import { checkOdometerProgression, recordOdometer } from '../services/fleet.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -30,14 +31,37 @@ router.post('/', requireRole('manager', 'admin'), asyncH(async (req, res) => {
   const vehicleType = needStr(req.body, 'vehicle_type', { max: 40, optional: true });
   const driverName = needStr(req.body, 'driver_name', { max: 120, optional: true });
   const tankCapacity = req.body.tank_capacity != null && req.body.tank_capacity !== '' ? Number(req.body.tank_capacity) : null;
+  const year = req.body.year != null && req.body.year !== '' ? Number(req.body.year) : null;
+  if (year != null && (!Number.isInteger(year) || year < 1950 || year > 2100)) throw bad('year must be a valid model year');
+  const status = String(req.body.status || 'ACTIVE').toUpperCase();
+  if (!['ACTIVE','INACTIVE','MAINTENANCE','ACCIDENT','RETIRED','SOLD','DISPOSED'].includes(status)) throw bad('Invalid vehicle status');
+  const initialOdo = req.body.current_odometer != null && req.body.current_odometer !== '' ? Number(req.body.current_odometer) : null;
   if (tankCapacity != null && (!Number.isFinite(tankCapacity) || tankCapacity <= 0)) throw bad('tank_capacity must be > 0');
 
   try {
     const { rows } = await pool.query(
-      `INSERT INTO vehicles (plate, make, model, vehicle_type, driver_name, tank_capacity, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [plate, make, model, vehicleType, driverName, tankCapacity, needStr(req.body, 'notes', { max: 500, optional: true })]);
+      `INSERT INTO vehicles (plate, make, model, vehicle_type, driver_name, tank_capacity, notes,
+                             year, vin, engine_no, expected_km_l, current_odometer, department,
+                             branch, station, status, axle_config, acquisition_date, acquisition_cost,
+                             ownership_type, supplier)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+       RETURNING *`,
+      [plate, make, model, vehicleType, driverName, tankCapacity, needStr(req.body, 'notes', { max: 500, optional: true }),
+        year, needStr(req.body, 'vin', { max: 60, optional: true }), needStr(req.body, 'engine_no', { max: 60, optional: true }),
+        req.body.expected_km_l != null && req.body.expected_km_l !== '' ? Number(req.body.expected_km_l) : null,
+        initialOdo ?? 0,
+        needStr(req.body, 'department', { max: 120, optional: true }),
+        needStr(req.body, 'branch', { max: 120, optional: true }), needStr(req.body, 'station', { max: 120, optional: true }),
+        status, needStr(req.body, 'axle_config', { max: 4, optional: true }) || '4x2',
+        needStr(req.body, 'acquisition_date', { max: 20, optional: true }),
+        req.body.acquisition_cost != null && req.body.acquisition_cost !== '' ? Number(req.body.acquisition_cost) : null,
+        needStr(req.body, 'ownership_type', { max: 40, optional: true }),
+        needStr(req.body, 'supplier', { max: 200, optional: true })]);
     await audit(null, { userId: req.user.sub, action: 'vehicle.create', entity: 'vehicles', entityId: rows[0].id, details: { plate }, ip: req.ip });
+    if (initialOdo != null) {
+      await recordOdometer(pool, { vehicleId: rows[0].id, odometer: initialOdo,
+        source: 'manual', refTable: 'vehicles', refId: rows[0].id, enteredBy: req.user.sub });
+    }
     res.status(201).json({ vehicle: rows[0] });
   } catch (err) {
     if (err.code === '23505') throw bad(`A vehicle with plate ${plate} already exists`);
@@ -143,17 +167,59 @@ router.patch('/:id', requireRole('manager', 'admin'), asyncH(async (req, res) =>
   }
   if (b.notes !== undefined) push('notes', needStr(b, 'notes', { max: 500, optional: true }));
   if (b.active !== undefined) { params.push(Boolean(b.active)); sets.push(`active = $${params.length}`); }
-  if (!sets.length) throw bad('Nothing to update');
-
-  const { rows } = await pool.query(
-    `UPDATE vehicles SET ${sets.join(', ')}, updated_at = now() WHERE id = $1 RETURNING *`, params);
+  if (b.year !== undefined) { params.push(b.year === '' || b.year == null ? null : Number(b.year)); sets.push(`year = $${params.length}`); }
+  for (const [col, key, max] of [['vin','vin',60],['engine_no','engine_no',60],['department','department',120],['branch','branch',120],['station','station',120],['ownership_type','ownership_type',40],['supplier','supplier',200]]) {
+    if (b[key] !== undefined) push(col, needStr(b, key, { max, optional: true }));
+  }
+  if (b.expected_km_l !== undefined) { params.push(b.expected_km_l === '' || b.expected_km_l == null ? null : Number(b.expected_km_l)); sets.push(`expected_km_l = $${params.length}`); }
+  if (b.acquisition_date !== undefined) push('acquisition_date', needStr(b, 'acquisition_date', { max: 20, optional: true }));
+  if (b.acquisition_cost !== undefined) { params.push(b.acquisition_cost === '' || b.acquisition_cost == null ? null : Number(b.acquisition_cost)); sets.push(`acquisition_cost = $${params.length}`); }
+  if (b.axle_config !== undefined) {
+    const cfg = needStr(b, 'axle_config', { max: 4, optional: true }) || '4x2';
+    if (!['4x2','4x4','6x2','6x4','8x4'].includes(cfg)) throw bad('Invalid axle configuration');
+    push('axle_config', cfg);
+  }
+  if (b.status !== undefined) {
+    const st = String(b.status || 'ACTIVE').toUpperCase();
+    if (!['ACTIVE','INACTIVE','MAINTENANCE','ACCIDENT','RETIRED','SOLD','DISPOSED'].includes(st)) throw bad('Invalid vehicle status');
+    push('status', st);
+    params.push(st === 'ACTIVE'); sets.push(`active = $${params.length}`); // keep fuel workflows in sync (§8)
+  }
+  const hasOdo = b.current_odometer !== undefined && b.current_odometer !== '' && b.current_odometer != null;
+  if (!sets.length && !hasOdo) throw bad('Nothing to update');
+  // current_odometer is not a row edit: it is validated against the odometer
+  // trail (§41) and appended as a history entry, never silently overwritten.
+  if (hasOdo) await checkOdometerProgression(pool, req.params.id, Number(b.current_odometer), null);
+  let rows;
+  if (sets.length) {
+    ({ rows } = await pool.query(
+      `UPDATE vehicles SET ${sets.join(', ')}, updated_at = now() WHERE id = $1 RETURNING *`, params));
+  } else {
+    ({ rows } = await pool.query('SELECT * FROM vehicles WHERE id = $1', [req.params.id]));
+  }
   if (!rows.length) throw notFound('Vehicle not found');
+  if (hasOdo) {
+    await recordOdometer(pool, { vehicleId: req.params.id, odometer: Number(b.current_odometer),
+      source: 'manual', refTable: 'vehicles', refId: req.params.id, enteredBy: req.user.sub });
+  }
   await audit(null, { userId: req.user.sub, action: 'vehicle.update', entity: 'vehicles', entityId: req.params.id, ip: req.ip });
   res.json({ vehicle: rows[0] });
 }));
 
 router.delete('/:id', asyncH(async (_req, _res) => {
   throw bad('Vehicles are never deleted. Deactivate instead (transaction history must remain intact).');
+}));
+
+// Vehicle profile (§9/§44) — register fields + the authoritative odometer trail.
+router.get('/:id/detail', asyncH(async (req, res) => {
+  if (!isUuid(req.params.id)) throw notFound('Vehicle not found');
+  const { rows } = await pool.query('SELECT * FROM vehicles WHERE id = $1', [req.params.id]);
+  if (!rows.length) throw notFound('Vehicle not found');
+  const { rows: odo } = await pool.query(
+    `SELECT odometer::float AS odometer, source, recorded_at
+       FROM vehicle_odometer_history WHERE vehicle_id = $1
+      ORDER BY recorded_at DESC LIMIT 200`, [req.params.id]);
+  res.json({ vehicle: rows[0], odometer_history: odo });
 }));
 
 export default router;

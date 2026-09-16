@@ -2,8 +2,9 @@
 // Vehicles — server-side search (?q=), add / edit / delete (deactivate) /
 // restore. Deletion is a soft delete: fuel history is never touched.
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, SearchInput, Notice, useForm, Field, DataTable, StatusPill, Skeleton, ConfirmDialog, EmptyState } from '@/components/ui';
+import { Card, PageHeader, SearchInput, Notice, useForm, Field, DataTable, StatusPill, Skeleton, ConfirmDialog, EmptyState, SearchableSelect } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fmtDate, fmtQty } from '@/lib/format';
@@ -12,7 +13,9 @@ export default function VehiclesPage() {
   return <Shell><Vehicles /></Shell>;
 }
 
-const EMPTY_FORM = { plate: '', make: '', model: '', vehicle_type: '', driver_name: '', tank_capacity: '', notes: '' };
+const EMPTY_FORM = { plate: '', make: '', model: '', vehicle_type: '', driver_name: '', tank_capacity: '', notes: '', year: '', vin: '', engine_no: '', expected_km_l: '', current_odometer: '', department: '', branch: '', axle_config: '4x2', status: 'ACTIVE', ownership_type: '', supplier: '' };
+const AXLE_CONFIGS = ['4x2', '4x4', '6x2', '6x4', '8x4'].map((v) => ({ value: v, label: v }));
+const VEHICLE_STATUSES = ['ACTIVE', 'INACTIVE', 'MAINTENANCE', 'ACCIDENT', 'RETIRED', 'SOLD', 'DISPOSED'].map((v) => ({ value: v, label: v }));
 
 function Vehicles() {
   const { user } = useAuth();
@@ -29,6 +32,7 @@ function Vehicles() {
   const [importBusy, setImportBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(null);
   const { form, bind, setForm } = useForm(EMPTY_FORM);
+  const router = useRouter();
 
   const load = useCallback(async () => {
     setError('');
@@ -41,7 +45,7 @@ function Vehicles() {
   useEffect(() => { load(); }, [load]);
 
   function openNew() { setEditing('new'); setForm(EMPTY_FORM); }
-  function openEdit(v) { setEditing(v.id); setForm({ ...v, tank_capacity: v.tank_capacity ?? '' }); }
+  function openEdit(v) { setEditing(v.id); setForm({ ...EMPTY_FORM, ...v, tank_capacity: v.tank_capacity ?? '', expected_km_l: v.expected_km_l ?? '', current_odometer: v.current_odometer ?? '', year: v.year ?? '' }); }
 
   // ── CSV bulk import ──
   function parseCsv(text) {
@@ -102,7 +106,13 @@ function Vehicles() {
     e.preventDefault();
     setBusy(true); setError('');
     try {
-      const body = { ...form, tank_capacity: form.tank_capacity === '' ? undefined : Number(form.tank_capacity) };
+      const body = { ...form,
+        tank_capacity: form.tank_capacity === '' ? undefined : Number(form.tank_capacity),
+        year: form.year === '' ? undefined : Number(form.year),
+        expected_km_l: form.expected_km_l === '' ? undefined : Number(form.expected_km_l),
+        current_odometer: form.current_odometer === '' ? undefined : Number(form.current_odometer),
+      };
+      delete body.created_at; delete body.updated_at; delete body.id; delete body.active;
       if (editing === 'new') {
         await api('/api/vehicles', { method: 'POST', body });
         setNotice(`Vehicle ${form.plate} added.`);
@@ -205,6 +215,21 @@ function Vehicles() {
             <Field label="Vehicle type"><input {...bind('vehicle_type')} placeholder="pickup / truck / saloon" /></Field>
             <Field label="Default driver"><input {...bind('driver_name')} /></Field>
             <Field label="Tank capacity (L)"><input type="number" inputMode="decimal" step="0.1" min="0" {...bind('tank_capacity')} /></Field>
+            <Field label="Year"><input type="number" inputMode="numeric" min="1950" max="2100" {...bind('year')} placeholder="e.g. 2019" /></Field>
+            <Field label="VIN"><input {...bind('vin')} placeholder="chassis number" /></Field>
+            <Field label="Engine no"><input {...bind('engine_no')} /></Field>
+            <Field label="Expected consumption (km/L)" hint="drives abnormal-consumption flags (§42)"><input type="number" inputMode="decimal" step="0.01" min="0" {...bind('expected_km_l')} /></Field>
+            <Field label="Odometer at intake (km)"><input type="number" inputMode="decimal" step="0.1" min="0" {...bind('current_odometer')} /></Field>
+            <Field label="Department"><input {...bind('department')} /></Field>
+            <Field label="Branch"><input {...bind('branch')} /></Field>
+            <Field label="Axle configuration" hint="determines valid tire positions">
+              <SearchableSelect value={form.axle_config || '4x2'} onChange={(v) => setForm((f) => ({ ...f, axle_config: v }))} options={AXLE_CONFIGS} />
+            </Field>
+            <Field label="Status" hint="non-ACTIVE vehicles are skipped by fuel workflows">
+              <SearchableSelect value={form.status || 'ACTIVE'} onChange={(v) => setForm((f) => ({ ...f, status: v }))} options={VEHICLE_STATUSES} />
+            </Field>
+            <Field label="Ownership"><input {...bind('ownership_type')} placeholder="owned / leased / hired" /></Field>
+            <Field label="Supplier"><input {...bind('supplier')} /></Field>
             <Field label="Notes"><input {...bind('notes')} /></Field>
             <div style={{ gridColumn: '1 / -1' }}>
               <button className="btn" disabled={busy}>{busy ? 'Saving…' : editing === 'new' ? 'Add vehicle' : 'Save changes'}</button>
@@ -217,10 +242,13 @@ function Vehicles() {
       <Card title="Fleet" actions={<SearchInput value={q} onChange={setQ} placeholder="Search plate, make, driver…" width={280} />}>
         {!rows ? <Skeleton lines={6} /> : (
           <DataTable
+            onRowClick={(r) => router.push(`/vehicles/${r.id}`)}
             columns={[
-              { key: 'plate', label: 'Plate', render: (r) => <b>{r.plate}</b> },
+              { key: 'plate', label: 'Plate', render: (r) => <b style={{ color: 'var(--blue, #2563eb)', cursor: 'pointer' }}>{r.plate}</b> },
               { key: 'make', label: 'Make / model', render: (r) => [r.make, r.model].filter(Boolean).join(' ') || '—' },
               { key: 'vehicle_type', label: 'Type', render: (r) => r.vehicle_type || '—' },
+              { key: 'odometer', label: 'Odometer', num: true, render: (r) => (r.current_odometer != null ? fmtQty(r.current_odometer, 'km') : '—') },
+              { key: 'fleet_status', label: 'Fleet status', render: (r) => r.status ? <StatusPill status={r.status} /> : '—' },
               { key: 'driver_name', label: 'Driver', render: (r) => r.driver_name || '—' },
               { key: 'tank_capacity', label: 'Tank', num: true, render: (r) => (r.tank_capacity ? fmtQty(r.tank_capacity) : '—') },
               { key: 'created_at', label: 'Added', render: (r) => fmtDate(r.created_at) },

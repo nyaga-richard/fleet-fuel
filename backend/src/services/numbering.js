@@ -3,6 +3,7 @@ const SEQ = {
   request: { seq: 'request_no_seq', prefix: 'REQ' },
   transaction: { seq: 'txn_no_seq', prefix: 'TXN' },
   receipt: { seq: 'receipt_no_seq', prefix: 'RCP' },
+  trip: { seq: 'trip_no_seq', prefix: 'TRP' },
 };
 
 export async function nextDocNumber(client, kind) {

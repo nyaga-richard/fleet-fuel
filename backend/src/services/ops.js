@@ -9,6 +9,7 @@ import { audit } from './audit.js';
 import { notify, notifyRoles } from './notify.js';
 import { createApproval } from './approvals.js';
 import { nextDocNumber } from './numbering.js';
+import { recordOdometer } from './fleet.js';
 import { ApiError } from '../middleware/errors.js';
 
 const dupResult = (existing) => ({ status: 'duplicate', ref: { id: existing.id } });
@@ -199,6 +200,12 @@ export async function issueFuel(client, { payload, userId }) {
   }
 
   await client.query(`UPDATE fuel_requests SET status = 'issued', updated_at = now() WHERE id = $1`, [request.id]);
+  const issueOdo = payload.odometer ?? request.odometer ?? null;
+  if (issueOdo != null) {
+    await recordOdometer(client, { vehicleId: request.vehicle_id, odometer: issueOdo,
+      source: 'fuel_transaction', refTable: 'fuel_transactions', refId: inserted[0].id,
+      enteredBy: userId, at: payload.created_at ?? null });
+  }
   await audit(client, { userId, action: 'fuel_transaction.issue', entity: 'fuel_transactions', entityId: inserted[0].id, details: { txn_no: txnNo, quantity: qty, ledger_entry: entry.id } });
   // §52/§53 — issuing beyond the authorized quantity records the ACTUAL
   // quantity (physical truth, never silently altered) and raises an excess
@@ -328,6 +335,12 @@ export async function directFuelEntry(client, { payload, userId }) {
       `INSERT INTO pump_readings (pump_id, reading, fuel_transaction_id, recorded_by, client_uuid, created_at)
        VALUES ($1,$2,$3,$4,$5, COALESCE($6::timestamptz, now()))`,
       [pumpId, pumpEnd, inserted[0].id, userId, clientUuid, payload.transaction_date ?? null]);
+  }
+
+  if (payload.odometer != null) {
+    await recordOdometer(client, { vehicleId: payload.vehicle_id, odometer: payload.odometer,
+      source: 'fuel_transaction', refTable: 'fuel_transactions', refId: inserted[0].id,
+      enteredBy: userId, at: payload.transaction_date ?? null });
   }
 
   await audit(client, {

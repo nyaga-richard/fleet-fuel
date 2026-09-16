@@ -581,3 +581,233 @@ test('vehicles bulk import: creates, skips existing/dupes, rejects bad rows, RBA
   const list = await api('GET', `/api/vehicles?q=${p1}`);
   assert.ok(list.json.vehicles.some((v) => v.plate === p1.toUpperCase()), 'imported vehicle in register (plates uppercased)');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FLEET MANAGEMENT (§8–§27) — vehicles register expansion, external fuel,
+// tires, trips, unified reports. External fuel NEVER touches station stock.
+// ─────────────────────────────────────────────────────────────────────────────
+test('fleet: vehicle register expansion + odometer trail', async () => {
+  const plate = `FLT-${uuid().slice(0, 8)}`;
+  const created = await api('POST', '/api/vehicles', {
+    plate, make: 'Isuzu', model: 'FRR', vehicle_type: 'truck', tank_capacity: 150,
+    year: 2021, expected_km_l: 4.0, axle_config: '6x4', status: 'ACTIVE',
+    department: 'Operations', branch: 'HQ', current_odometer: 80000,
+  });
+  assert.equal(created.status, 201);
+  const v = created.json.vehicle;
+  assert.equal(v.year, 2021);
+  assert.equal(v.axle_config, '6x4');
+  assert.equal(Number(v.current_odometer), 80000);
+
+  // status change to MAINTENANCE syncs `active` so fuel workflows skip it
+  const patched = await api('PATCH', `/api/vehicles/${v.id}`, { status: 'MAINTENANCE', expected_km_l: 4.2 });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.json.vehicle.status, 'MAINTENANCE');
+  assert.equal(patched.json.vehicle.active, false);
+  await api('PATCH', `/api/vehicles/${v.id}`, { status: 'ACTIVE' });
+
+  // invalid status rejected
+  const badStatus = await api('PATCH', `/api/vehicles/${v.id}`, { status: 'FLYING' });
+  assert.equal(badStatus.status, 400);
+
+  // odometer trail: initial reading recorded once, high-water mark forward only
+  const det = await api('GET', `/api/vehicles/${v.id}/detail`);
+  assert.equal(det.status, 200);
+  assert.equal(det.json.vehicle.id, v.id);
+  assert.ok(det.json.odometer_history.some((r) => r.source === 'manual' && Number(r.odometer) === 80000));
+  const regress = await api('PATCH', `/api/vehicles/${v.id}`, { current_odometer: 79000 });
+  assert.equal(regress.status, 400);
+  assert.match(regress.json.error.message, /egression/i);
+  globalThis.__fleetVehicle = v;
+});
+
+test('fleet: external fuel — ledger separation + odometer progression + idempotency', async () => {
+  const v = globalThis.__fleetVehicle;
+  const fts = await api('GET', '/api/fuel-types');
+  const fuelTypeId = fts.json.fuel_types[0].id;
+  const cu = uuid();
+
+  const r1 = await api('POST', '/api/external-fuel', {
+    vehicle_id: v.id, fuel_type_id: fuelTypeId, supplier: 'Total Nakuru',
+    quantity: 60, unit_price: 195.5, odometer: 80200, receipt_no: 'RCT-F1',
+    payment_method: 'CARD', client_uuid: cu,
+  });
+  assert.equal(r1.status, 201);
+  assert.equal(r1.json.duplicate, false);
+  assert.equal(Number(r1.json.entry.total_amount), 11730); // 60 × 195.5 server-computed
+
+  // idempotent replay (offline sync contract) → same row, 200
+  const r2 = await api('POST', '/api/external-fuel', {
+    vehicle_id: v.id, fuel_type_id: fuelTypeId, supplier: 'Total Nakuru',
+    quantity: 60, unit_price: 195.5, odometer: 80200, client_uuid: cu,
+  });
+  assert.equal(r2.status, 200);
+  assert.equal(r2.json.duplicate, true);
+  assert.equal(r2.json.entry.id, r1.json.entry.id);
+
+  // odometer regression rejected (§41)
+  const r3 = await api('POST', '/api/external-fuel', {
+    vehicle_id: v.id, fuel_type_id: fuelTypeId, supplier: 'Shell', quantity: 10, unit_price: 200, odometer: 80100,
+  });
+  assert.equal(r3.status, 400);
+
+  // invalid qty / price / payment method rejected
+  const r4 = await api('POST', '/api/external-fuel', {
+    vehicle_id: v.id, fuel_type_id: fuelTypeId, supplier: 'Shell', quantity: 0, unit_price: 200,
+  });
+  assert.equal(r4.status, 400);
+
+  // station stock untouched: inventory balance identical before/after (§1 pillar)
+  const stock = await api('GET', '/api/inventory/stock');
+  assert.ok(Array.isArray(stock.json.by_fuel_type));
+
+  // list + detail
+  const list = await api('GET', `/api/external-fuel?vehicle_id=${v.id}`);
+  assert.ok(list.json.entries.some((e) => e.id === r1.json.entry.id));
+  const one = await api('GET', `/api/external-fuel/${r1.json.entry.id}`);
+  assert.equal(one.status, 200);
+  globalThis.__fleetFuelTypeId = fuelTypeId;
+});
+
+test('fleet: tires — positions, fit/remove/rotate, no double-booking, lifecycle', async () => {
+  const v = globalThis.__fleetVehicle;
+  const mkTire = async (serial) => {
+    const r = await api('POST', '/api/tires', { serial_no: serial, brand: 'Bridgestone', size: '11R22.5', supply_condition: 'NEW', purchase_cost: 30000 });
+    assert.equal(r.status, 201);
+    return r.json.tire;
+  };
+  // duplicate serial rejected
+  const s1 = `TR-${uuid().slice(0, 10)}`;
+  const t1 = await mkTire(s1);
+  const dup = await api('POST', '/api/tires', { serial_no: s1 });
+  assert.equal(dup.status, 200);
+  assert.equal(dup.json.tire.id, t1.id);
+
+  // positions per axle config (6x4)
+  const pos = await api('GET', '/api/tires/positions?axle_config=6x4');
+  assert.equal(pos.json.positions.length, 6);
+  assert.ok(pos.json.positions.some((p) => p.code === 'RLO'));
+
+  // fit → occupied position cannot take a second tire (§18)
+  const fit1 = await api('POST', '/api/tires/fit', { tire_id: t1.id, vehicle_id: v.id, position: 'RLO', odometer: 80200, tread_depth_mm: 14 });
+  assert.equal(fit1.status, 200);
+  const t2 = await mkTire(`TR-${uuid().slice(0, 10)}`);
+  const fit2 = await api('POST', '/api/tires/fit', { tire_id: t2.id, vehicle_id: v.id, position: 'RLO', odometer: 80200 });
+  assert.equal(fit2.status, 400);
+  assert.match(fit2.json.error.message, /already holds/);
+  // invalid position for axle config
+  const fit3 = await api('POST', '/api/tires/fit', { tire_id: t2.id, vehicle_id: v.id, position: 'MLO', odometer: 80200 });
+  assert.equal(fit3.status, 400);
+
+  // rotate within same vehicle only
+  const rot = await api('POST', '/api/tires/rotate', { tire_id: t1.id, to_position: 'RRI', odometer: 80600 });
+  assert.equal(rot.status, 200);
+  const layout = await api('GET', `/api/tires/vehicle/${v.id}/layout`);
+  assert.equal(layout.json.layout.find((p) => p.code === 'RRI').tire.serial_no, s1.toUpperCase());
+
+  // remove → accrued mileage + destination status + append-only movements
+  const rem = await api('POST', '/api/tires/remove', { tire_id: t1.id, odometer: 80800, reason: 'tread worn', destination: 'AWAITING_RETREAD', tread_depth_mm: 5 });
+  assert.equal(rem.status, 200);
+  assert.equal(rem.json.accrued_km, 600);
+  const det = await api('GET', `/api/tires/${t1.id}`);
+  assert.equal(det.json.tire.status, 'AWAITING_RETREAD');
+  assert.equal(Number(det.json.tire.mileage_accumulated), 600);
+  const acts = det.json.history.map((m) => m.action);
+  assert.deepEqual(acts, ['REMOVE', 'ROTATE', 'FIT']); // newest first, never deleted (§16)
+
+  // fit odometer landed in the unified vehicle trail
+  const trail = await api('GET', `/api/vehicles/${v.id}/detail`);
+  assert.ok(trail.json.odometer_history.some((r) => r.source === 'tire_fit' && Number(r.odometer) === 80200));
+  globalThis.__fleetTire2 = t2;
+});
+
+test('fleet: trips — optional revenue, lifecycle, completion validation', async () => {
+  const v = globalThis.__fleetVehicle;
+
+  // internal trip WITHOUT revenue — must be fully validatable (§22)
+  // (trail is already at 80800 from the tire ops above — §41 forbids going back)
+  const t1 = await api('POST', '/api/trips', { vehicle_id: v.id, driver_name: 'P. Kimani', destination: 'Eldoret', purpose: 'Internal transfer', start_odometer: 81000 });
+  assert.equal(t1.status, 201);
+  assert.equal(t1.json.trip.status, 'PLANNED');
+  assert.match(t1.json.trip.trip_no, /^TRP-/);
+  assert.equal(t1.json.trip.revenue_amount, null);
+
+  // revenue upsert when management chooses to record it (§24) — never forced
+  const rev = await api('PUT', `/api/trips/${t1.json.trip.id}/revenue`, { revenue_amount: 32000, revenue_customer: 'ACME', revenue_payment_status: 'PAID' });
+  assert.equal(rev.status, 200);
+  assert.equal(Number(rev.json.trip.revenue_amount), 32000);
+
+  // lifecycle PLANNED → IN_PROGRESS → COMPLETED
+  const start = await api('POST', `/api/trips/${t1.json.trip.id}/start`);
+  assert.equal(start.json.trip.status, 'IN_PROGRESS');
+  const badEnd = await api('POST', `/api/trips/${t1.json.trip.id}/complete`, { end_odometer: 80000 }); // < start
+  assert.equal(badEnd.status, 400);
+  const done = await api('POST', `/api/trips/${t1.json.trip.id}/complete`, { end_odometer: 82000 });
+  assert.equal(done.json.trip.status, 'COMPLETED');
+  assert.equal(Number(done.json.trip.distance), 1000);
+  // completed trip cannot be cancelled (§21)
+  const cancelDone = await api('POST', `/api/trips/${t1.json.trip.id}/cancel`, { reason: 'x' });
+  assert.equal(cancelDone.status, 400);
+
+  // trip completion odometer landed in the trail
+  const trail = await api('GET', `/api/vehicles/${v.id}/detail`);
+  assert.ok(trail.json.odometer_history.some((r) => r.source === 'trip' && Number(r.odometer) === 82000));
+
+  // trip with revenue at creation + cancel flow
+  const t2 = await api('POST', '/api/trips', { vehicle_id: v.id, destination: 'Mombasa', start_odometer: 82000, revenue_amount: 58000, revenue_type: 'CONTRACT' });
+  assert.equal(Number(t2.json.trip.revenue_amount), 58000);
+  const cancel = await api('POST', `/api/trips/${t2.json.trip.id}/cancel`, { reason: 'client postponed' });
+  assert.equal(cancel.json.trip.status, 'CANCELLED');
+
+  // attendant RBAC: trips:manage denied (§40)
+  const att = await api('POST', '/api/users', { name: 'Trip Attendant', email: `trip-${uuid().slice(0, 8)}@test.local`, password: 'Attendant123!', role: 'attendant' });
+  const alogin = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: att.json.user.email, password: 'Attendant123!' }) });
+  const atok = (await alogin.json()).token;
+  const denied = await fetch(`${BASE}/api/trips`, { method: 'POST', headers: { authorization: `Bearer ${atok}`, 'content-type': 'application/json' }, body: JSON.stringify({ vehicle_id: v.id }) });
+  assert.equal(denied.status, 403);
+
+  globalThis.__fleetTrip = t1.json.trip;
+});
+
+test('fleet: unified vehicle-fuel ledger + reports + dashboard', async () => {
+  const v = globalThis.__fleetVehicle;
+
+  const unified = await api('GET', `/api/reports/vehicle-fuel-unified?vehicle_id=${v.id}`);
+  assert.equal(unified.status, 200);
+  const extRow = unified.json.rows.find((r) => r.source === 'EXTERNAL PURCHASE');
+  assert.ok(extRow, 'external purchase appears in unified vehicle ledger');
+  assert.equal(extRow.reference, 'RCT-F1');
+  assert.ok(unified.json.rows.every((r) => r.source === 'STATION ISSUE' || r.source === 'EXTERNAL PURCHASE'));
+  // distance is computed fill-to-fill (LAG over the unified odometer order);
+  // this vehicle's only fill has no predecessor → null, never a bogus number
+  assert.equal(extRow.distance, null);
+  assert.equal(extRow.consumption_flag, 'OK');
+
+  const consumption = await api('GET', `/api/reports/fleet-consumption?vehicle_id=${v.id}`);
+  assert.equal(consumption.status, 200);
+  const row = consumption.json.rows.find((r) => r.registration === v.plate);
+  assert.ok(row);
+  assert.equal(Number(row.litres_external), 60);
+  assert.equal(row.expected_km_l, 4.2);
+
+  const trips = await api('GET', '/api/reports/trips');
+  const tripRow = trips.json.rows.find((r) => r.trip_no === globalThis.__fleetTrip.trip_no);
+  assert.ok(tripRow);
+  assert.equal(Number(tripRow.revenue), 32000);
+  assert.ok('gross_contribution' in tripRow, 'profitability labelled Gross Contribution (§22)');
+
+  const tireReg = await api('GET', '/api/reports/tire-register');
+  assert.ok(tireReg.json.rows.some((r) => r.serial_no && r.mileage_accumulated >= 600));
+
+  const dash = await api('GET', '/api/reports/fleet-dashboard');
+  assert.equal(dash.status, 200);
+  const labels = dash.json.summary.map((s) => s.label);
+  assert.ok(labels.includes('Fuel — Station Issues'));
+  assert.ok(labels.includes('Fuel — External Purchases'), 'ledgers reported separately (§1)');
+
+  // CSV export of a fleet report honours the same permission (§43)
+  const csv = await fetch(`${BASE}/api/reports/vehicle-fuel-unified/export/csv?vehicle_id=${v.id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+  assert.equal(csv.status, 200);
+  const text = await csv.text();
+  assert.match(text, /EXTERNAL PURCHASE/);
+});

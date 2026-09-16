@@ -26,7 +26,8 @@ function Dashboard() {
       api('/api/requests?status=pending&limit=8'),
       api(`/api/transactions?from=${from}&limit=500`),
       api('/api/system/version'),
-    ]).then(([stock, requests, txns, version]) => setData({ stock, requests, txns, version }))
+      api('/api/reports/fleet-dashboard').catch(() => null), // attendants lack reports:view — section hides
+    ]).then(([stock, requests, txns, version, fleet]) => setData({ stock, requests, txns, version, fleet }))
       .catch((e) => setError(e.message));
   }, []);
 
@@ -43,6 +44,8 @@ function Dashboard() {
     );
   }
 
+  const fleet = data.fleet;
+  const fleetKpi = Object.fromEntries((fleet?.summary || []).map((s) => [s.label, s.value]));
   const stock = data.stock.by_fuel_type || [];
   const tanks = data.stock.by_tank || [];
   const txns = data.txns.transactions || [];
@@ -124,7 +127,36 @@ function Dashboard() {
           pageSize={10}
         />
       </Card>
-    </>
+    
+      {fleet && (
+        <>
+          <div className="grid c4" style={{ marginTop: 18, marginBottom: 14 }}>
+            <Stat label="Active vehicles" value={fleetKpi['Active Vehicles'] || '0'} sub="fleet register" tone="#2563eb" />
+            <Stat label="Fuel — all sources" value={fleetKpi['Fuel Cost (all sources)'] || '—'} sub="station issues + external purchases" tone="#f59e0b" />
+            <Stat label="Trips (period)" value={fleetKpi['Trips (period)'] || '—'} sub="distance covered" tone="#8b5cf6" />
+            <Stat label="Trip revenue" value={fleetKpi['Trip Revenue (where recorded)'] || 'KES 0.00'} sub="revenue is optional per trip" tone="#22c55e" />
+          </div>
+          <Card title="Top fuel consumers — this month" actions={<Link className="btn secondary sm" href="/external-fuel">External fuel →</Link>}>
+            <DataTable
+              keyField="registration"
+              columns={[
+                { key: 'registration', label: 'Plate', render: (r) => <b>{r.registration}</b> },
+                { key: 'vehicle', label: 'Vehicle', render: (r) => r.vehicle || '—' },
+                { key: 'litres', label: 'Fuel (L)', num: true, render: (r) => fmtNum(r.litres, 2) },
+                { key: 'cost', label: 'Cost', num: true, render: (r) => fmtNum(r.cost, 2) },
+                { key: 'distance', label: 'Distance (km)', num: true, render: (r) => fmtNum(r.distance) },
+                { key: 'km_per_l', label: 'KM/L', num: true, render: (r) => r.km_per_l ?? '—' },
+                { key: 'flag', label: 'Consumption', render: (r) => r.flag === 'ABNORMAL'
+                  ? <span className="pill" style={{ color: 'var(--red)', borderColor: 'var(--red)', background: 'rgba(239,68,68,.1)' }}><span className="dot" style={{ background: 'var(--red)' }} />Abnormal</span>
+                  : <span className="muted">OK</span> },
+              ]}
+              rows={fleet.rows || []}
+              empty={<span className="muted">No fuel recorded in this period yet.</span>}
+            />
+          </Card>
+        </>
+      )}
+</>
   );
 }
 

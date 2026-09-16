@@ -44,13 +44,13 @@ export async function orgProfile() {
   };
 }
 
-function dateFilters(q, params, alias = 'it.created_at') {
+export function dateFilters(q, params, alias = 'it.created_at') {
   const where = [];
   if (q.from) { params.push(dayStart(q.from, 'from')); where.push(`${alias} >= $${params.length}`); }
   if (q.to) { params.push(dayStart(q.to, 'to')); where.push(`${alias} < ($${params.length}::timestamptz + interval '1 day')`); }
   return where;
 }
-function filtersText(q, labels) {
+export function filtersText(q, labels) {
   return Object.entries(labels)
     .filter(([k]) => q[k])
     .map(([k, label]) => `${label}: ${q[k]}`)
@@ -855,4 +855,20 @@ Object.assign(REPORTS, {
   'fuel-inventory': { build: fuelInventory, perm: 'reports:view' },
   'fuel-cost': { build: fuelCost, perm: 'reports:view' },
   'cost-per-km': { build: costPerKm, perm: 'reports:view' },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FLEET reports (§28–§31) — additive registration; builders live in
+// reports-fleet.js and consume both fuel sources (§5/§7).
+// ─────────────────────────────────────────────────────────────────────────────
+import {
+  unifiedVehicleLedger, fleetConsumption, tripRegister, tireRegister, fleetDashboard,
+} from './reports-fleet.js';
+
+Object.assign(REPORTS, {
+  'vehicle-fuel-unified': { build: unifiedVehicleLedger, perm: 'reports:view' },
+  'fleet-consumption': { build: fleetConsumption, perm: 'reports:view' },
+  'trips': { build: tripRegister, perm: 'trips:view' },
+  'tire-register': { build: tireRegister, perm: 'tires:view' },
+  'fleet-dashboard': { build: fleetDashboard, perm: 'reports:view' },
 });

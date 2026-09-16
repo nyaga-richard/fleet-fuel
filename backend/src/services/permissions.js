@@ -11,6 +11,10 @@ const ALL = [
   'fuel_requests:view', 'fuel_requests:create', 'fuel_requests:approve', 'fuel_requests:reject',
   // direct fuel entry (§28/§29) — bypasses the request workflow entirely
   'fuel_entries:view', 'fuel_entries:create',
+  // fleet expansion (§40) — external fuel, tires, trips
+  'external_fuel:view', 'external_fuel:record',
+  'tires:view', 'tires:manage',
+  'trips:view', 'trips:manage',
   // excess fuel
   'fuel_excess:approve', 'fuel_excess:reject',
   // inventory
