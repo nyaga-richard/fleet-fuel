@@ -132,75 +132,80 @@ function DirectEntry() {
   }
 
   return (
-    <div style={{ display: 'grid', gap: 16, maxWidth: 760 }}>
-      <PageHeader
-        title="Direct Fuel Entry"
-        subtitle="Record fuel already issued — no request or approval needed."
-      />
-
-      {done && (
-        <Notice kind="success">
-          Recorded <b>{done.txn_no}</b> — {fmtKES(done.applied)}/L applied ({done.source}), total {fmtKES(done.total)}.
-          {done.balance != null && <> Tank balance now {fmtQty(done.balance)}.</>}
-        </Notice>
+    <div style={{ display: 'grid', gap: 16 }}>
+      {(done || error) && (
+        <div>
+          {done && (
+            <Notice kind="success">
+              Recorded <b>{done.txn_no}</b> — {fmtKES(done.applied)}/L applied ({done.source}), total {fmtKES(done.total)}.
+              {done.balance != null && <> Tank balance now {fmtQty(done.balance)}.</>}
+            </Notice>
+          )}
+          {error && <Notice kind="error">{error}</Notice>}
+        </div>
       )}
-      {error && <Notice kind="error">{error}</Notice>}
 
-      <Card>
-        <div className="frow">
-          <Field label="Date"><input type="date" value={form.date} onChange={set('date')} /></Field>
-          <Field label="Quantity (L) *"><input type="number" inputMode="decimal" step="0.01" min="0.01" value={form.quantity} onChange={set('quantity')} placeholder="e.g. 85.5" /></Field>
-        </div>
-        <div className="frow">
-          <Field label="Vehicle *">
-            <SearchableSelect
-              value={form.vehicle_id} onChange={set('vehicle_id')} placeholder="Select vehicle…"
-              options={vehicles.map((v) => ({ value: v.id, label: v.plate, sub: [v.make, v.model].filter(Boolean).join(' ') }))}
-            />
-          </Field>
-          <Field label="Fuel type *">
-            <SearchableSelect
-              value={form.fuel_type_id} onChange={(id) => { set('fuel_type_id')(id); set('tank_id')(''); }}
-              placeholder="Select fuel…"
-              options={fuels.map((f) => ({ value: f.id, label: f.name, sub: f.code || '' }))}
-            />
-          </Field>
-        </div>
-        <div className="frow">
-          <Field label="Tank *">
-            <SearchableSelect
-              value={form.tank_id} onChange={set('tank_id')} placeholder={form.fuel_type_id ? 'Select tank…' : 'Select fuel type first'}
-              options={tankOptions}
-            />
-          </Field>
-          <Field label="Odometer (km)"><input type="number" inputMode="numeric" min="0" value={form.odometer} onChange={set('odometer')} placeholder="e.g. 124870" /></Field>
-        </div>
-        <div className="frow">
-          <Field label="Fueling price (KES/L) — optional" hint={costPrice != null ? `Leave blank to use the cost price (${fmtKES(costPrice)}/L).` : 'No cost price on record — enter a price.'}>
-            <input type="number" inputMode="decimal" step="0.01" min="0" value={form.unit_price} onChange={set('unit_price')} placeholder={costPrice != null ? String(costPrice) : 'required'} />
-          </Field>
-          <Field label="Destination — optional"><input value={form.destination} onChange={set('destination')} placeholder="e.g. Molo" /></Field>
-        </div>
+      <div className="de-grid">
+        <Card title="Entry details">
+          <div className="frow">
+            <Field label="Date"><input type="date" value={form.date} onChange={set('date')} /></Field>
+            <Field label="Quantity (L) *"><input type="number" inputMode="decimal" step="0.01" min="0.01" value={form.quantity} onChange={set('quantity')} placeholder="e.g. 85.5" /></Field>
+          </div>
+          <div className="frow">
+            <Field label="Vehicle *">
+              <SearchableSelect
+                value={form.vehicle_id} onChange={set('vehicle_id')} placeholder="Select vehicle…"
+                options={vehicles.map((v) => ({ value: v.id, label: v.plate, sub: [v.make, v.model].filter(Boolean).join(' ') }))}
+              />
+            </Field>
+            <Field label="Fuel type *">
+              <SearchableSelect
+                value={form.fuel_type_id} onChange={(id) => { set('fuel_type_id')(id); set('tank_id')(''); }}
+                placeholder="Select fuel…"
+                options={fuels.map((f) => ({ value: f.id, label: f.name, sub: f.code || '' }))}
+              />
+            </Field>
+          </div>
+          <div className="frow">
+            <Field label="Tank *">
+              <SearchableSelect
+                value={form.tank_id} onChange={set('tank_id')} placeholder={form.fuel_type_id ? 'Select tank…' : 'Select fuel type first'}
+                options={tankOptions}
+              />
+            </Field>
+            <Field label="Odometer (km)"><input type="number" inputMode="numeric" min="0" value={form.odometer} onChange={set('odometer')} placeholder="e.g. 124870" /></Field>
+          </div>
+          <div className="frow">
+            <Field label="Fueling price (KES/L) — optional" hint={costPrice != null ? `Leave blank to use the cost price (${fmtKES(costPrice)}/L).` : 'No cost price on record — enter a price.'}>
+              <input type="number" inputMode="decimal" step="0.01" min="0" value={form.unit_price} onChange={set('unit_price')} placeholder={costPrice != null ? String(costPrice) : 'required'} />
+            </Field>
+            <Field label="Destination — optional"><input value={form.destination} onChange={set('destination')} placeholder="e.g. Molo" /></Field>
+          </div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            Posting reduces station stock immediately, writes both ledgers and creates an audit event. No approval is created; corrections use the normal reversal flow.
+          </div>
+        </Card>
 
-        <div className="kv" style={{ margin: '14px 0 4px' }}>
-          {[
-            ['Vehicle', vehicleName],
-            ['Fuel', fuelName],
-            ['Tank', tankName],
-            ['Quantity', fmtQty(qty)],
-            ...(applied != null ? [['Applied price', `${fmtKES(applied)}/L — ${source}`]] : [['Applied price', '—']]),
-            ...(total != null ? [['Total value', fmtKES(total)]] : []),
-          ].map(([k, v]) => <div className="kv-row" key={k}><span className="kv-k">{k}</span><span className="kv-v">{v}</span></div>)}
+        <div className="de-side">
+          <Card title="Preview">
+            <div className="kv">
+              {[
+                ['Vehicle', vehicleName],
+                ['Fuel', fuelName],
+                ['Tank', tankName],
+                ['Quantity', fmtQty(qty)],
+                ...(applied != null ? [['Applied price', `${fmtKES(applied)}/L — ${source}`]] : [['Applied price', '—']]),
+                ...(total != null ? [['Total value', fmtKES(total)]] : []),
+                ...(form.odometer !== '' ? [['Odometer', `${Number(form.odometer).toLocaleString()} km`]] : []),
+              ].map(([k, v]) => <div className="kv-row" key={k}><span className="kv-k">{k}</span><span className="kv-v">{v}</span></div>)}
+            </div>
+            <div className="de-actions" style={{ marginTop: 14 }}>
+              <button type="button" className="btn secondary" onClick={reset}>Reset</button>
+              <button type="button" className="btn" onClick={tryConfirm} disabled={busy}>Record Fuel…</button>
+            </div>
+          </Card>
         </div>
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-          <button type="button" className="btn secondary" onClick={reset}>Reset</button>
-          <button type="button" className="btn" onClick={tryConfirm} disabled={busy}>Record Fuel…</button>
-        </div>
-        <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-          Posting reduces station stock immediately, writes both ledgers and creates an audit event. No approval is created; corrections use the normal reversal flow.
-        </div>
-      </Card>
+      </div>
 
       <ConfirmDialog
         open={confirm}

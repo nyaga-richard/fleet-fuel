@@ -378,6 +378,12 @@ button.btn + button.btn { margin-left: 8px; }
 .fb-toggle { display: none; }
 .fb-body { margin-top: 0; }
 
+/* ── Direct fuel entry (§ responsive): form + sticky preview side-by-side on
+   desktop, stacked on tablet/phone; fields full-width single column on phones ── */
+.de-grid { display: grid; gap: 16px; grid-template-columns: 1fr; min-width: 0; }
+.de-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.fld input { min-height: 42px; }
+
 /* ── Mobile bottom navigation (§4/§7): phone web keeps primary destinations one tap away ── */
 .mobilenav { display: none; }
 .nav-badge {
@@ -424,6 +430,14 @@ button.btn + button.btn { margin-left: 8px; }
   .stat .value { font-size: 20px; }
   .gs-drop { position: fixed; left: 10px; right: 10px; top: calc(var(--topbar-h) + 4px); min-width: 0; width: auto; }
   .globalsearch:not(.compact) { display: none; }
+}
+@media (min-width: 1100px) {
+  .de-grid { grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); align-items: start; }
+  .de-side { position: sticky; top: 66px; }
+}
+@media (max-width: 768px) {
+  .fld input { min-height: 48px; font-size: 16px; } /* 48px targets + no iOS zoom (§40) */
+  .de-actions button { flex: 1 1 auto; min-height: 48px; }
 }
 @media (max-width: 620px) {
   .grid.c2, .grid.c3, .grid.c4 { grid-template-columns: 1fr; }

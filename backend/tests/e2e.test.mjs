@@ -548,3 +548,36 @@ test('§43 device diagnostics: /me masks tokens, /test is admin-only', async () 
   const denied = await fetch(`${BASE}/api/devices/test`, { method: 'POST', headers: { authorization: `Bearer ${mtok}` } });
   assert.equal(denied.status, 403, 'manager cannot send test pushes');
 });
+
+test('vehicles bulk import: creates, skips existing/dupes, rejects bad rows, RBAC', async () => {
+  const p1 = `BULK-${uuid().slice(0, 6)}`;
+  const r1 = await api('POST', '/api/vehicles/bulk', { rows: [
+    { plate: p1, make: 'Toyota', model: 'Hilux', vehicle_type: 'pickup', driver_name: 'J. Otieno' },
+    { plate: p1, make: 'Dup in file' },                                  // duplicate in file → skipped
+    { plate: '', make: 'No plate' },                                     // failed
+    { plate: p1.toLowerCase(), make: 'Case-insensitive' },                // dup after upper-case normalisation
+    { plate: `BULK2-${uuid().slice(0, 6)}`, tank_capacity: 'not-a-num' }, // failed
+    { plate: `BULK3-${uuid().slice(0, 6)}`, tank_capacity: 150 },         // created
+  ] });
+  assert.equal(r1.status, 200);
+  assert.equal(r1.json.created, 2);
+  assert.equal(r1.json.skipped, 2);
+  assert.equal(r1.json.failed, 2);
+
+  // re-import → all existing rows skipped (idempotent)
+  const r2 = await api('POST', '/api/vehicles/bulk', { rows: [{ plate: p1 }] });
+  assert.equal(r2.status, 200);
+  assert.equal(r2.json.created, 0);
+  assert.equal(r2.json.skipped, 1);
+
+  // attendant denied
+  const att = await api('POST', '/api/users', { name: 'BI Attendant', email: `bi-${uuid().slice(0, 8)}@test.local`, password: 'Attendant123!', role: 'attendant' });
+  const alogin = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: att.json.user.email, password: 'Attendant123!' }) });
+  const atok = (await alogin.json()).token;
+  const denied = await fetch(`${BASE}/api/vehicles/bulk`, { method: 'POST', headers: { authorization: `Bearer ${atok}`, 'content-type': 'application/json' }, body: JSON.stringify({ rows: [{ plate: 'X' }] }) });
+  assert.equal(denied.status, 403);
+
+  // imported vehicle is visible in the register and audited implicitly by list
+  const list = await api('GET', `/api/vehicles?q=${p1}`);
+  assert.ok(list.json.vehicles.some((v) => v.plate === p1.toUpperCase()), 'imported vehicle in register (plates uppercased)');
+});
