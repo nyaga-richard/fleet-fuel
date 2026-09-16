@@ -33,7 +33,9 @@ function DirectEntry() {
   const [error, setError] = useState('');
   const [done, setDone] = useState(null); // { txn_no, applied, source, total, balance }
 
-  const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+  // Accepts BOTH raw-input events (e.target.value) and plain values from
+  // SearchableSelect — a raw event object must never reach state/render.
+  const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v && v.target ? v.target.value : v }));
 
   useEffect(() => {
     api('/api/auth/me').then((d) => setRole(d?.user?.role || d?.role || null)).catch(() => {});
