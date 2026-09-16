@@ -13,8 +13,9 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
+import { useTheme, THEMES } from '@/lib/theme';
 
-// Navigation IA (§22/§26): five logical groups, role-filtered. The Fuel
+// Navigation IA (§22/§26/§49) — logical groups, role-filtered. The Fuel
 // Requests badge (§28) is the only nav badge — it IS pending work.
 const NAV = [
   { group: 'Overview', links: [
@@ -24,15 +25,18 @@ const NAV = [
     { href: '/requests', label: 'Fuel Requests', roles: ['admin', 'manager', 'attendant'], icon: 'file', badge: 'requests' },
     { href: '/issue', label: 'Issue Fuel', roles: ['admin', 'manager', 'attendant'], icon: 'drop' },
     { href: '/direct-entry', label: 'Direct Fuel Entry', roles: ['admin', 'manager'], icon: 'drop' },
-    { href: '/vehicles', label: 'Vehicles', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },
-    { href: '/trips', label: 'Trips', roles: ['admin', 'manager'], icon: 'file' },
-    { href: '/tires', label: 'Tires', roles: ['admin', 'manager'], icon: 'chip' },
     { href: '/external-fuel', label: 'External Fuel', roles: ['admin', 'manager'], icon: 'drop' },
+    { href: '/trips', label: 'Trips', roles: ['admin', 'manager'], icon: 'file' },
   ]},
-  { group: 'Inventory', links: [
+  { group: 'Fleet', links: [
+    { href: '/vehicles', label: 'Vehicles', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },
+    { href: '/tires', label: 'Tires', roles: ['admin', 'manager'], icon: 'chip' },
+  ]},
+  { group: 'Inventory & Suppliers', links: [
     { href: '/ledger', label: 'Fuel Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'book' },
     { href: '/vehicle-ledger', label: 'Vehicle Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },
     { href: '/inventory', label: 'Inventory', roles: ['admin', 'manager', 'attendant'], icon: 'box' },
+    { href: '/suppliers', label: 'Suppliers', roles: ['admin', 'manager'], icon: 'users' },
   ]},
   { group: 'Reports', links: [
     { href: '/reports', label: 'Reports', roles: ['admin', 'manager'], icon: 'file' },
@@ -298,9 +302,32 @@ function UserChip({ user, menu, setMenu, logout, compact }) {
             <div className="muted" style={{ fontSize: 12 }}>{user?.email}</div>
             <span className="pill" style={{ marginTop: 6, textTransform: 'capitalize', borderColor: 'var(--accent)', color: 'var(--accent-2)' }}>{user?.role}</span>
           </div>
+          <ThemePicker />
           <button role="menuitem" onClick={logout}>Sign out</button>
         </div>
       )}
+    </div>
+  );
+}
+
+// §34/§41 — Appearance picker: LIGHT / DARK / SYSTEM. Applies instantly via
+// the theme context (tokens flip app-wide), persists locally + server-side.
+function ThemePicker() {
+  const { theme, setTheme } = useTheme();
+  const labels = { LIGHT: 'Light', DARK: 'Dark', SYSTEM: 'System' };
+  return (
+    <div className="theme-picker" role="radiogroup" aria-label="Appearance">
+      {THEMES.map((t) => (
+        <button
+          key={t}
+          role="radio"
+          aria-checked={theme === t}
+          className={'theme-opt' + (theme === t ? ' on' : '')}
+          onClick={() => setTheme(t)}
+        >
+          {labels[t]}
+        </button>
+      ))}
     </div>
   );
 }

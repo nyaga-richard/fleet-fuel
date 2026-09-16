@@ -15,6 +15,15 @@ const ALL = [
   'external_fuel:view', 'external_fuel:record',
   'tires:view', 'tires:manage',
   'trips:view', 'trips:manage',
+  // wheel configuration master data (§1–§8)
+  'wheel_configs:view', 'wheel_configs:manage',
+  // tire bulk import (§9–§16) — rides on tires:manage for the data itself
+  'tire_imports:view',
+  // supplier accounting (§30)
+  'suppliers:view', 'suppliers:create', 'suppliers:update',
+  'supplier_ledger:view',
+  'supplier_payments:view', 'supplier_payments:create', 'supplier_payments:reverse',
+  'supplier_statements:view',
   // excess fuel
   'fuel_excess:approve', 'fuel_excess:reject',
   // inventory

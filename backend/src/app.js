@@ -25,6 +25,10 @@ import fuelEntriesRoutes from './routes/fuel-entries.js';
 import externalFuelRoutes from './routes/external-fuel.js';
 import tiresRoutes from './routes/tires.js';
 import tripsRoutes from './routes/trips.js';
+import wheelConfigsRoutes from './routes/wheel-configs.js';
+import suppliersRoutes from './routes/suppliers.js';
+import tireImportsRoutes from './routes/tire-imports.js';
+import meRoutes from './routes/me.js';
 import { flushPushes } from './services/push.js';
 
 export function createApp() {
@@ -81,6 +85,10 @@ app.use('/api/fuel-entries', fuelEntriesRoutes);
 app.use('/api/external-fuel', externalFuelRoutes);
 app.use('/api/tires', tiresRoutes);
 app.use('/api/trips', tripsRoutes);
+app.use('/api/wheel-configs', wheelConfigsRoutes);
+app.use('/api/suppliers', suppliersRoutes);
+app.use('/api/tire-imports', tireImportsRoutes);
+app.use('/api/me', meRoutes);
 
   app.use('/api', notFoundHandler);
   app.get('/', (_req, res) => res.json({ service: 'fleet-fuel-api', docs: '/api/health', version: config.version }));

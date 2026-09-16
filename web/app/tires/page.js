@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Shell from '@/components/Shell';
 import { Card, PageHeader, DataTable, StatusPill, Notice, Skeleton, Field, ExportMenu, SearchableSelect, Tabs, useForm, Drawer, EmptyState } from '@/components/ui';
 import { api } from '@/lib/api';
+import TireImport, { ImportHistory } from '@/components/tire-import';
 import { useAuth } from '@/lib/auth';
 import { fmtDate, fmtKES, fmtQty } from '@/lib/format';
 
@@ -30,8 +31,10 @@ function Tires() {
         subtitle="Serial-numbered tire assets — one tire, one position. Full lifecycle history, never rewritten."
         actions={<ExportMenu report="tire-register" />}
       />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'register', label: 'Register' }, { value: 'layout', label: 'Vehicle Layout' }]} />
-      {tab === 'register' ? <Register canManage={canManage} /> : <Layout canManage={canManage} />}
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'register', label: 'Register' }, { value: 'layout', label: 'Vehicle Layout' }, { value: 'import', label: 'Import' }]} />
+      {tab === 'register' && <Register canManage={canManage} />}
+      {tab === 'layout' && <Layout canManage={canManage} />}
+      {tab === 'import' && canManage && <ImportTab />}
     </>
   );
 }
@@ -373,6 +376,21 @@ function Layout({ canManage }) {
             <div className="muted" style={{ fontSize: 12 }}>◀ left side · right side ▶</div>
           </div>
         )}
+      </Card>
+    </>
+  );
+}
+
+
+// ── Import (§9–§16) — upload → preview → commit, with batch history ─────────
+function ImportTab() {
+  const [histKey, setHistKey] = useState(0);
+  return (
+    <>
+      <TireImport onDone={() => setHistKey((k) => k + 1)} />
+      <div style={{ height: 16 }} />
+      <Card title="Import history">
+        <ImportHistory key={histKey} />
       </Card>
     </>
   );

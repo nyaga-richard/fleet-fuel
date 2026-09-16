@@ -863,6 +863,8 @@ Object.assign(REPORTS, {
 // ─────────────────────────────────────────────────────────────────────────────
 import {
   unifiedVehicleLedger, fleetConsumption, tripRegister, tireRegister, fleetDashboard,
+  tireImports, tireInventory, wheelConfigsReport, supplierStatement, supplierAging,
+  approvalHistory,
 } from './reports-fleet.js';
 
 Object.assign(REPORTS, {
@@ -871,4 +873,13 @@ Object.assign(REPORTS, {
   'trips': { build: tripRegister, perm: 'trips:view' },
   'tire-register': { build: tireRegister, perm: 'tires:view' },
   'fleet-dashboard': { build: fleetDashboard, perm: 'reports:view' },
+});
+
+Object.assign(REPORTS, {
+  'tire-imports': { build: tireImports, perm: 'tire_imports:view' },
+  'tire-inventory': { build: tireInventory, perm: 'tires:view' },
+  'wheel-configs': { build: wheelConfigsReport, perm: 'wheel_configs:view' },
+  'supplier-statement': { build: supplierStatement, perm: 'supplier_statements:view' },
+  'supplier-aging': { build: supplierAging, perm: 'supplier_statements:view' },
+  'approval-history': { build: approvalHistory, perm: 'reports:view' },
 });

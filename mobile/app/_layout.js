@@ -9,6 +9,9 @@ import { startAutoSync } from '../src/sync';
 import { configurePushHandling } from '../src/push';
 import { api } from '../src/api';
 import { C } from '../theme';
+import { applyAppearance, watchSystemTheme, resolvedTheme, currentAppearance, onThemeApplied as subscribeTheme } from '../theme/colors';
+import { kvGet } from '../src/db';
+import { rebuildComponentStyles } from '../src/components';
 
 const PROBE_THROTTLE_MS = 5 * 60 * 1000; // don't probe more than once per 5 min
 
@@ -70,15 +73,40 @@ function Bootstrap() {
   );
 }
 
+// Root layout (§31–§40): loads the persisted appearance (default SYSTEM),
+// re-themes live when the OS scheme changes under SYSTEM, and remounts the
+// whole tree when the palette flips so module-scope styles rebuild too.
 export default function RootLayout() {
+  const [themeTick, setThemeTick] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    // Stored preference wins; default SYSTEM until first change (§32).
+    kvGet('appearance')
+      .then((p) => { if (alive) applyAppearance(p || 'SYSTEM'); })
+      .catch(() => {});
+    // Best-effort server mirror — theme must never depend on the network.
+    kvGet('appearance')
+      .then((p) => p && api('/api/me/theme', { method: 'PUT', body: JSON.stringify({ theme: p }) }).catch(() => {}))
+      .catch(() => {});
+    const unwatch = watchSystemTheme(() => currentAppearance());
+    const off = subscribeTheme(() => {
+      rebuildComponentStyles();          // module-scope shared styles re-create
+      if (alive) setThemeTick((t) => t + 1); // remount screens → re-read C
+    });
+    return () => { alive = false; unwatch(); off(); };
+  }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <AuthProvider>
-          <StatusBar style="light" />
+        <AuthProvider key={themeTick}>
+          <StatusBar style={resolvedTheme() === 'DARK' ? 'light' : 'dark'} />
           <Bootstrap />
         </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
+
+

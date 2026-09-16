@@ -6,6 +6,7 @@ import { useAuth } from '../src/auth';
 import { api } from '../src/api';
 import { deviceId, kvGet, outboxCount } from '../src/db';
 import { C , ICON } from '../theme';
+import { applyAppearance, currentAppearance } from '../theme/colors';
 import { fmtDateTime } from '../src/fmt';
 
 // Profile (spec §1–3): everything shown comes from the authenticated session
@@ -20,14 +21,25 @@ export default function ProfileScreen() {
   const [pending, setPending] = useState(0);
   const [sessionOk, setSessionOk] = useState(null); // null = checking
   const [confirmOut, setConfirmOut] = useState(false);
+  const [appearance, setAppearance] = useState('SYSTEM');
 
   useFocusEffect(useCallback(() => {
     (async () => {
       setDevice(await deviceId());
       setLastSync(await kvGet('last_sync_success'));
       setPending(await outboxCount());
+      setAppearance(await kvGet('appearance') || 'SYSTEM');
     })();
   }, []));
+
+  // §41 Appearance — persists to the device kv store and re-themes the whole
+  // app immediately. The server mirror keeps web + mobile consistent (§39).
+  async function pickAppearance(next) {
+    setAppearance(next);
+    await kvSet('appearance', next);
+    applyAppearance(next);
+    api('/api/me/theme', { method: 'PUT', body: JSON.stringify({ theme: next }) }).catch(() => {});
+  }
 
   // Quiet session verification (only when online) — shows real status.
   useEffect(() => {
@@ -85,6 +97,36 @@ export default function ProfileScreen() {
             Pending operations are kept safely on this device — even after logout — and sync when the same account signs back in.
           </Text>
         )}
+      </Card>
+
+      {/* §41 — Appearance: System / Light / Dark, applied instantly */}
+      <Card>
+        <Text style={{ color: C.muted, fontSize: 11.5, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>
+          Appearance
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {[['SYSTEM', 'System'], ['LIGHT', 'Light'], ['DARK', 'Dark']].map(([val, label]) => {
+            const on = appearance === val;
+            return (
+              <TouchableOpacity
+                key={val}
+                accessibilityRole="button"
+                accessibilityLabel={`Appearance ${label}`}
+                onPress={() => pickAppearance(val)}
+                style={{
+                  flex: 1, minHeight: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+                  borderWidth: 1, borderColor: on ? C.accent : C.border,
+                  backgroundColor: on ? C.accentSoft : C.bg,
+                }}
+              >
+                <Text style={{ color: on ? C.accent2 : C.text, fontSize: 13, fontWeight: '700' }}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={{ color: C.muted, fontSize: 11.5, marginTop: 8 }}>
+          {currentAppearance() === 'SYSTEM' ? 'Following your device setting.' : 'Applied to the whole app.'}
+        </Text>
       </Card>
 
       <Btn label="Sync status" icon="sync" variant="secondary" onPress={() => router.push('/(tabs)/sync')} />

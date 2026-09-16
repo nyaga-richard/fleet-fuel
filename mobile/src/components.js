@@ -494,7 +494,11 @@ export function Confirm({ visible, title, message, danger, busy, confirmLabel = 
 }
 
 // ── Styles — composed ONLY from theme tokens ─────────────────────────────────
-const styles = StyleSheet.create({
+// Rebuilt when the appearance changes so re-mounted screens pick up the new
+// palette (§31–§40). Everything else in this file reads C at render time.
+let styles;
+function buildStyles() {
+ styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: C.bg },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SP.md },
   header: { flexDirection: 'row', alignItems: 'center', gap: SP.md, paddingTop: SP.sm, paddingBottom: SP.md },
@@ -581,4 +585,7 @@ const styles = StyleSheet.create({
 
   confirmWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,.66)', alignItems: 'center', justifyContent: 'center', padding: SP.xxl },
   confirmCard: { backgroundColor: C.panel, borderColor: C.border, borderWidth: 1, borderRadius: R.lg, padding: SP.xxl, width: '100%', maxWidth: 400, ...shadowFloat },
-});
+ });
+}
+buildStyles();
+export { buildStyles as rebuildComponentStyles };

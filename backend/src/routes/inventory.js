@@ -52,6 +52,7 @@ router.post('/receipts', requireRole('manager', 'admin'), asyncH(async (req, res
     invoice_no: needStr(req.body, 'invoice_no', { max: 80, optional: true }),
     unit_price: needNum(req.body, 'unit_price', { min: 0, optional: true }),
     delivery_note: needStr(req.body, 'delivery_note', { max: 200, optional: true }),
+    supplier_id: optUuid(req.body, 'supplier_id'), // §21 — records supplier payable when provided
     client_uuid: optUuid(req.body, 'client_uuid'),
   };
   const { row, duplicate } = await tx((client) => createReceipt(client, { payload, userId: req.user.sub }));

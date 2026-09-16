@@ -456,6 +456,23 @@ export async function createReceipt(client, { payload, userId }) {
     performed_by: userId,
   });
 
+  // §21 — fuel purchase → fuel inventory + supplier payable. Optional: only
+  // when the receipt names a supplier account. One authoritative ledger entry.
+  if (payload.supplier_id) {
+    const isU = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(payload.supplier_id));
+    if (!isU) throw new ApiError(400, 'supplier_id must be a valid id');
+    if (payload.unit_price == null) throw new ApiError(400, 'unit_price is required when recording the purchase against a supplier account');
+    const { rows: sup } = await client.query('SELECT id, name FROM suppliers WHERE id = $1', [payload.supplier_id]);
+    if (!sup.length) throw new ApiError(400, 'Supplier not found');
+    const payable = +(qty * Number(payload.unit_price)).toFixed(2);
+    await client.query(
+      `INSERT INTO supplier_ledger_entries
+         (supplier_id, entry_type, entry_date, reference, description, debit, source_table, source_id, created_by)
+       VALUES ($1,'PURCHASE', COALESCE($2::date, CURRENT_DATE),$3,$4,$5,'purchases',$6,$7)`,
+      [payload.supplier_id, payload.created_at ?? null, payload.invoice_no || receiptNo,
+        `Fuel purchase ${receiptNo} — ${qty} L @ ${payload.unit_price}`, payable, rows[0].id, userId]);
+  }
+
   await audit(client, { userId, action: 'purchase.receipt', entity: 'purchases', entityId: rows[0].id, details: { receipt_no: receiptNo, quantity: qty } });
   return { row: { ...rows[0], balance_after: entry.balance_after }, duplicate: false };
 }

@@ -4,6 +4,7 @@ import Shell from '@/components/Shell';
 import { Card, Table, Notice, Tabs, useForm, Field, SearchableSelect } from '@/components/ui';
 import { api } from '@/lib/api';
 import { fmtQty } from '@/lib/format';
+import WheelConfigManager from '@/components/wheel-configs';
 
 export default function ConfigurationPage() {
   return <Shell><Config /></Shell>;
@@ -20,11 +21,13 @@ function Config() {
           { value: 'fuel', label: 'Fuel types' },
           { value: 'tanks', label: 'Tanks' },
           { value: 'pumps', label: 'Pumps' },
+          { value: 'wheel', label: 'Wheel Configurations' },
         ]}
       />
       {tab === 'fuel' && <FuelTypes />}
       {tab === 'tanks' && <Tanks />}
       {tab === 'pumps' && <Pumps />}
+      {tab === 'wheel' && <WheelConfigManager />}
     </>
   );
 }

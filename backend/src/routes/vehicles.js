@@ -6,6 +6,7 @@ import { asyncH, bad, notFound } from '../middleware/errors.js';
 import { needStr, optUuid, isUuid } from '../middleware/validate.js';
 import { audit } from '../services/audit.js';
 import { checkOdometerProgression, recordOdometer } from '../services/fleet.js';
+import { loadConfiguration } from '../services/wheel-configs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -38,13 +39,21 @@ router.post('/', requireRole('manager', 'admin'), asyncH(async (req, res) => {
   const initialOdo = req.body.current_odometer != null && req.body.current_odometer !== '' ? Number(req.body.current_odometer) : null;
   if (tankCapacity != null && (!Number.isFinite(tankCapacity) || tankCapacity <= 0)) throw bad('tank_capacity must be > 0');
 
+  // §1/§6 — a vehicle may be created directly on a configuration.
+  let initialCfgId = req.body.wheel_configuration_id || null;
+  if (initialCfgId != null) {
+    if (!isUuid(String(initialCfgId))) throw bad('wheel_configuration_id must be a valid id');
+    const { rows: cfgRow } = await pool.query('SELECT id, code FROM wheel_configurations WHERE id = $1 AND is_active = true', [initialCfgId]);
+    if (!cfgRow.length) throw bad('Wheel configuration not found or inactive');
+  }
+
   try {
     const { rows } = await pool.query(
       `INSERT INTO vehicles (plate, make, model, vehicle_type, driver_name, tank_capacity, notes,
                              year, vin, engine_no, expected_km_l, current_odometer, department,
                              branch, station, status, axle_config, acquisition_date, acquisition_cost,
-                             ownership_type, supplier)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+                             ownership_type, supplier, wheel_configuration_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
        RETURNING *`,
       [plate, make, model, vehicleType, driverName, tankCapacity, needStr(req.body, 'notes', { max: 500, optional: true }),
         year, needStr(req.body, 'vin', { max: 60, optional: true }), needStr(req.body, 'engine_no', { max: 60, optional: true }),
@@ -56,8 +65,13 @@ router.post('/', requireRole('manager', 'admin'), asyncH(async (req, res) => {
         needStr(req.body, 'acquisition_date', { max: 20, optional: true }),
         req.body.acquisition_cost != null && req.body.acquisition_cost !== '' ? Number(req.body.acquisition_cost) : null,
         needStr(req.body, 'ownership_type', { max: 40, optional: true }),
-        needStr(req.body, 'supplier', { max: 200, optional: true })]);
+        needStr(req.body, 'supplier', { max: 200, optional: true }), initialCfgId]);
     await audit(null, { userId: req.user.sub, action: 'vehicle.create', entity: 'vehicles', entityId: rows[0].id, details: { plate }, ip: req.ip });
+    if (initialCfgId) {
+      await pool.query(
+        'INSERT INTO vehicle_wheel_config_history (vehicle_id, configuration_id, changed_by) VALUES ($1,$2,$3)',
+        [rows[0].id, initialCfgId, req.user.sub]);
+    }
     if (initialOdo != null) {
       await recordOdometer(pool, { vehicleId: rows[0].id, odometer: initialOdo,
         source: 'manual', refTable: 'vehicles', refId: rows[0].id, enteredBy: req.user.sub });
@@ -184,6 +198,53 @@ router.patch('/:id', requireRole('manager', 'admin'), asyncH(async (req, res) =>
     if (!['ACTIVE','INACTIVE','MAINTENANCE','ACCIDENT','RETIRED','SOLD','DISPOSED'].includes(st)) throw bad('Invalid vehicle status');
     push('status', st);
     params.push(st === 'ACTIVE'); sets.push(`active = $${params.length}`); // keep fuel workflows in sync (§8)
+  }
+  // Wheel configuration assignment (§6): validate conflicts with existing
+  // tire assignments; authorization escalates for vehicles in operation;
+  // history rows are append-only.
+  if (b.wheel_configuration_id !== undefined) {
+    const cfgId = b.wheel_configuration_id || null;
+    const { rows: vehRows } = await pool.query('SELECT * FROM vehicles WHERE id = $1', [req.params.id]);
+    if (!vehRows.length) throw notFound('Vehicle not found');
+    const veh = vehRows[0];
+    if (cfgId && !isUuid(cfgId)) throw bad('wheel_configuration_id must be a valid id');
+    let cfg = null;
+    if (cfgId) {
+      cfg = await loadConfiguration(pool, cfgId);
+      if (!cfg) throw bad('Wheel configuration not found');
+      if (!cfg.configuration.is_active) throw bad('That wheel configuration is inactive');
+    }
+    if (cfgId && String(cfgId) !== String(veh.wheel_configuration_id)) {
+      const { rows: fitted } = await pool.query(
+        'SELECT serial_no, current_position FROM tires WHERE current_vehicle_id = $1 AND current_position IS NOT NULL', [req.params.id]);
+      const codes = new Set(cfg.positions.map((p) => p.position_code));
+      const conflicts = fitted.filter((t) => !codes.has(t.current_position));
+      if (conflicts.length) {
+        // §6/§8 — never silently move tires; the user must remove them first.
+        throw bad(`Cannot change configuration: tire(s) ${conflicts.map((t) => `${t.serial_no} @ ${t.current_position}`).join(', ')} do not exist on ${cfg.configuration.code}. Remove them first`);
+      }
+      const { rows: hist } = await pool.query(
+        'SELECT COUNT(*)::int AS n FROM vehicle_wheel_config_history WHERE vehicle_id = $1', [req.params.id]);
+      const inOperation = (veh.current_odometer > 0 && hist[0].n > 0) || fitted.length > 0;
+      if (inOperation && req.user.role !== 'admin') {
+        throw bad('Only an administrator can change the wheel configuration of a vehicle already in operation (§6)');
+      }
+    }
+    if (cfgId && String(cfgId) !== String(veh.wheel_configuration_id)) {
+      await pool.query('UPDATE vehicle_wheel_config_history SET ended_at = now() WHERE vehicle_id = $1 AND ended_at IS NULL', [req.params.id]);
+      await pool.query(
+        'INSERT INTO vehicle_wheel_config_history (vehicle_id, configuration_id, changed_by) VALUES ($1,$2,$3)',
+        [req.params.id, cfgId, req.user.sub]);
+      // Keep the legacy axle_config column in sync for older flows.
+      const { rows: cfgRow } = await pool.query('SELECT code FROM wheel_configurations WHERE id = $1', [cfgId]);
+      if (cfgRow.length) { params.push(cfgRow[0].code); sets.push(`axle_config = $${params.length}`); }
+      params.push(cfgId); sets.push(`wheel_configuration_id = $${params.length}`);
+      await audit(null, { userId: req.user.sub, action: 'vehicle.wheel_config_changed', entity: 'vehicles', entityId: req.params.id,
+        details: { to: cfg.configuration.code }, ip: req.ip });
+    } else if (!cfgId && veh.wheel_configuration_id) {
+      await pool.query('UPDATE vehicle_wheel_config_history SET ended_at = now() WHERE vehicle_id = $1 AND ended_at IS NULL', [req.params.id]);
+      params.push(null); sets.push('wheel_configuration_id = $' + params.length);
+    }
   }
   const hasOdo = b.current_odometer !== undefined && b.current_odometer !== '' && b.current_odometer != null;
   if (!sets.length && !hasOdo) throw bad('Nothing to update');

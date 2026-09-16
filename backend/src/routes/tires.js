@@ -9,6 +9,7 @@ import { needStr, needUuid, needNum, optUuid, optNum, optStr, isUuid } from '../
 import { audit } from '../services/audit.js';
 import { recordOdometer } from '../services/fleet.js';
 import { POSITIONS, POSITION_LABELS } from '../services/fleet.js';
+import { positionsForVehicle, loadConfiguration } from '../services/wheel-configs.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -31,10 +32,41 @@ router.get('/', requirePerm('tires:view'), asyncH(async (req, res) => {
 }));
 
 router.get('/positions', requirePerm('tires:view'), asyncH(async (req, res) => {
-  const config = String(req.query.axle_config || '4x2');
-  const list = POSITIONS[config] || POSITIONS['4x2'];
-  res.json({ positions: list.map((p) => ({ code: p, label: POSITION_LABELS[p] })) });
-}));
+  // §2/§7 — positions come from the wheel-configuration master data. Pass a
+  // vehicle_id for its exact configuration; axle_config uses the seeded
+  // system configuration with that code (back-compat).
+  let positions = null;
+  let config = null;
+  if (req.query.vehicle_id) {
+    if (!isUuid(req.query.vehicle_id)) throw bad('vehicle_id must be a valid id');
+    const { rows: veh } = await pool.query(
+      'SELECT * FROM vehicles WHERE id = $1', [req.query.vehicle_id]);
+    if (!veh.length) throw notFound('Vehicle not found');
+    positions = await positionsForVehicle(pool, veh[0]);
+    if (veh[0].wheel_configuration_id) config = await loadConfiguration(pool, veh[0].wheel_configuration_id);
+  } else {
+    const code = String(req.query.axle_config || '4x2');
+    const { rows: cfg } = await pool.query('SELECT id FROM wheel_configurations WHERE code = $1', [code]);
+    if (cfg.length) {
+      const full = await loadConfiguration(pool, cfg[0].id);
+      positions = full.positions; config = full.configuration;
+    }
+  }
+  if (!positions) positions = (POSITIONS['4x2'] || []).map((c) => ({ position_code: c, display_name: POSITION_LABELS[c] || c }));
+  const list = positions.map((p) => ({ code: p.position_code, label: p.display_name || POSITION_LABELS[p.position_code] || p.position_code }));
+  // Occupancy: which of these positions currently hold a tire.
+  let occupied = [];
+  const occVehicle = req.query.vehicle_id;
+  if (occVehicle && isUuid(occVehicle)) {
+    const { rows: occ } = await pool.query(
+      'SELECT current_position FROM tires WHERE current_vehicle_id = $1 AND current_position IS NOT NULL', [occVehicle]);
+    occupied = occ.map((o) => o.current_position);
+  }
+  res.json({
+    positions: list.map((p) => ({ ...p, occupied: occupied.includes(p.code) })),
+    config: config ? { id: config.id, code: config.code, name: config.name, axles: config.axles, wheel_count: config.wheel_count } : null,
+  });
+}));;
 
 router.get('/:id', requirePerm('tires:view'), asyncH(async (req, res) => {
   if (!isUuid(req.params.id)) throw notFound('Tire not found');
@@ -78,6 +110,19 @@ router.post('/', requirePerm('tires:manage'), asyncH(async (req, res) => {
       [payload.serial_no, payload.brand, payload.pattern, payload.size, payload.tire_type,
         payload.ply_rating, payload.supply_condition, payload.purchase_date, payload.purchase_cost,
         payload.supplier, payload.tread_depth_mm, payload.notes, payload.client_uuid]);
+    // §21 — tire purchase → tire inventory + supplier payable (optional).
+    if (payload.supplier_id && payload.create_payable) {
+      const cost = payload.purchase_cost != null ? Number(payload.purchase_cost) : null;
+      if (cost == null) throw bad('purchase_cost is required when recording a supplier payable');
+      await pool.query(
+        `INSERT INTO supplier_ledger_entries
+           (supplier_id, entry_type, entry_date, reference, description, debit, source_table, source_id, created_by)
+         VALUES ($1,'PURCHASE', COALESCE($2::date, CURRENT_DATE),$3,$4,$5,'tires',$6,$7)`,
+        [payload.supplier_id, payload.purchase_date ?? null,
+          `Tire ${payload.serial_no}`, `Tire purchase — ${payload.serial_no}${payload.supplier ? ` (${payload.supplier})` : ''}`,
+          cost, rows[0].id, req.user.sub]);
+      await audit(null, { userId: req.user.sub, action: 'supplier.payable.created', entity: 'tires', entityId: rows[0].id, details: { serial_no: payload.serial_no, cost }, ip: req.ip });
+    }
     await audit(null, { userId: req.user.sub, action: 'tire.create', entity: 'tires', entityId: rows[0].id, details: { serial_no: payload.serial_no }, ip: req.ip });
     res.status(201).json({ tire: rows[0] });
   } catch (err) {
@@ -90,7 +135,8 @@ router.post('/', requirePerm('tires:manage'), asyncH(async (req, res) => {
 router.post('/fit', requirePerm('tires:manage'), asyncH(async (req, res) => {
   const tireId = needUuid(req.body, 'tire_id');
   const vehicleId = needUuid(req.body, 'vehicle_id');
-  const position = needStr(req.body, 'position', { max: 4 }).toUpperCase();
+  // §5 — stable codes: legacy FL/FR/RLO… and generated A1-L/A2-L-O… both allowed.
+  const position = needStr(req.body, 'position', { max: 12 }).toUpperCase();
   const odometer = needNum(req.body, 'odometer', { min: 0 });
   const treadDepth = optNum(req.body, 'tread_depth_mm', { min: 0 });
 
@@ -100,10 +146,11 @@ router.post('/fit', requirePerm('tires:manage'), asyncH(async (req, res) => {
     const t = tire[0];
     if (t.status === 'DISPOSED') throw bad('Cannot fit a disposed tire');
     if (t.status === 'ON_VEHICLE') throw bad(`Tire is already on ${t.current_vehicle_id === vehicleId ? 'this vehicle' : 'another vehicle'} — remove it first`);
-    const { rows: veh } = await client.query('SELECT id, plate, axle_config, current_odometer FROM vehicles WHERE id = $1', [vehicleId]);
+    const { rows: veh } = await client.query('SELECT * FROM vehicles WHERE id = $1', [vehicleId]);
     if (!veh.length) throw notFound('Vehicle not found');
-    const allowed = POSITIONS[veh[0].axle_config] || POSITIONS['4x2'];
-    if (!allowed.includes(position)) throw bad(`Position ${position} is not valid for a ${veh[0].axle_config} vehicle (${allowed.join(', ')})`);
+    const cfgPositions = await positionsForVehicle(client, veh[0]);
+    const allowed = cfgPositions.map((p) => p.position_code);
+    if (!allowed.includes(position)) throw bad(`Position ${position} is not valid for a ${veh[0].wheel_configuration_id ? veh[0].axle_config : veh[0].axle_config} vehicle (${allowed.join(', ')})`);
     // No double-booking of positions (§18).
     const { rows: occupied } = await client.query(
       'SELECT serial_no FROM tires WHERE current_vehicle_id = $1 AND current_position = $2', [vehicleId, position]);
@@ -175,7 +222,7 @@ router.post('/remove', requirePerm('tires:manage'), asyncH(async (req, res) => {
 // ── Rotate (§15): same vehicle, position A → position B; history preserved.
 router.post('/rotate', requirePerm('tires:manage'), asyncH(async (req, res) => {
   const tireId = needUuid(req.body, 'tire_id');
-  const toPosition = needStr(req.body, 'to_position', { max: 4 }).toUpperCase();
+  const toPosition = needStr(req.body, 'to_position', { max: 12 }).toUpperCase();
   const odometer = needNum(req.body, 'odometer', { min: 0 });
 
   const row = await tx(async (client) => {
@@ -183,8 +230,9 @@ router.post('/rotate', requirePerm('tires:manage'), asyncH(async (req, res) => {
     if (!tire.length) throw notFound('Tire not found');
     const t = tire[0];
     if (t.status !== 'ON_VEHICLE') throw bad('Only a tire on a vehicle can be rotated');
-    const { rows: veh } = await client.query('SELECT plate, axle_config FROM vehicles WHERE id = $1', [t.current_vehicle_id]);
-    const allowed = POSITIONS[veh[0].axle_config] || POSITIONS['4x2'];
+    const { rows: veh } = await client.query('SELECT * FROM vehicles WHERE id = $1', [t.current_vehicle_id]);
+    const cfgPositions = await positionsForVehicle(client, veh[0]);
+    const allowed = cfgPositions.map((p) => p.position_code);
     if (!allowed.includes(toPosition)) throw bad(`Position ${toPosition} is not valid for a ${veh[0].axle_config} vehicle`);
     if (toPosition === t.current_position) throw bad('The tire is already in that position');
     const { rows: occupied } = await client.query(
@@ -211,16 +259,36 @@ router.post('/rotate', requirePerm('tires:manage'), asyncH(async (req, res) => {
 // Current layout of a vehicle (§17).
 router.get('/vehicle/:id/layout', requirePerm('tires:view'), asyncH(async (req, res) => {
   if (!isUuid(req.params.id)) throw notFound('Vehicle not found');
-  const { rows: veh } = await pool.query('SELECT id, plate, axle_config, current_odometer FROM vehicles WHERE id = $1', [req.params.id]);
+  const { rows: veh } = await pool.query('SELECT * FROM vehicles WHERE id = $1', [req.params.id]);
   if (!veh.length) throw notFound('Vehicle not found');
-  const { rows: fitted } = await pool.query(
-    'SELECT id, serial_no, brand, size, current_position, tread_depth_mm, installed_odometer, installed_at FROM tires WHERE current_vehicle_id = $1',
-    [req.params.id]);
-  const allowed = POSITIONS[veh[0].axle_config] || POSITIONS['4x2'];
+  const { rows: tires } = await pool.query(
+    `SELECT id, serial_no, brand, size, status, current_position, installed_at, installed_odometer
+       FROM tires WHERE current_vehicle_id = $1`, [req.params.id]);
+  const byPos = Object.fromEntries(tires.map((t) => [t.current_position, t]));
+  const cfgPositions = await positionsForVehicle(pool, veh[0]);
+  const layout = cfgPositions.map((p) => ({
+    code: p.position_code,
+    label: p.display_name || POSITION_LABELS[p.position_code] || p.position_code,
+    axle_number: p.axle_number, axle_type: p.axle_type, side: p.side, wheel_position: p.wheel_position,
+    tire: byPos[p.position_code]
+      ? { id: byPos[p.position_code].id, serial_no: byPos[p.position_code].serial_no, brand: byPos[p.position_code].brand,
+          installed_at: byPos[p.position_code].installed_at, installed_odometer: byPos[p.position_code].installed_odometer }
+      : null,
+  }));
+  // Grouped view generated from the configuration (§7) — no hardcoded layouts.
+  const axleNumbers = [...new Set(layout.map((l) => l.axle_number).filter((n) => n != null))].sort((a, b) => a - b);
+  const axles = axleNumbers.map((n) => ({
+    axle_number: n,
+    axle_type: layout.find((l) => l.axle_number === n)?.axle_type || null,
+    positions: layout.filter((l) => l.axle_number === n),
+  }));
+  const config = veh[0].wheel_configuration_id ? await loadConfiguration(pool, veh[0].wheel_configuration_id) : null;
   res.json({
-    vehicle: veh[0],
-    layout: allowed.map((p) => ({ code: p, label: POSITION_LABELS[p], tire: fitted.find((t) => t.current_position === p) ?? null })),
+    vehicle: { id: veh[0].id, plate: veh[0].plate, axle_config: veh[0].axle_config,
+      wheel_configuration_id: veh[0].wheel_configuration_id,
+      config: config ? { id: config.configuration.id, code: config.configuration.code, name: config.configuration.name } : null },
+    layout, axles,
   });
-}));
+}));;
 
 export default router;

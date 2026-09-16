@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, ExportMenu, Field, FilterBar } from '@/components/ui';
+import { Card, ExportMenu, Field, FilterBar, SearchableSelect } from '@/components/ui';
 import { api } from '@/lib/api';
 import { fmtKES, fmtDateTime } from '@/lib/format';
 
@@ -27,6 +27,12 @@ const REPORTS = [
   { key: 'fuel-transactions', title: 'Fuel Transactions', desc: 'Every issue/return/receipt transaction.', dated: true },
   { key: 'approval-history', title: 'Approval History', desc: 'Immutable trail of every approval decision.', dated: true },
   { key: 'audit-logs', title: 'Audit Logs', desc: 'Full system audit trail.', dated: true, adminOnly: true },
+  // Wave 2 (§45)
+  { key: 'tire-imports', title: 'Tire Imports', desc: 'Bulk import batches with created/skipped/failed counts.', dated: false },
+  { key: 'tire-inventory', title: 'Tire Inventory', desc: 'Tire stock with vehicle, position, supplier and cost.', dated: false },
+  { key: 'wheel-configs', title: 'Wheel Configurations', desc: 'Configurations with axle layouts and vehicle usage.', dated: false },
+  { key: 'supplier-statement', title: 'Supplier Statement', desc: 'Per-supplier statement with running balance.', dated: true, needsSupplier: true },
+  { key: 'supplier-aging', title: 'Supplier Aging', desc: 'Outstanding payables by age bucket (Current/30/60/90/90+).', dated: true },
 ];
 
 export default function ReportsPage() {
@@ -41,6 +47,12 @@ function Reports() {
   const [to, setTo] = useState(today);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [suppliers, setSuppliers] = useState([]);
+  const [supplierId, setSupplierId] = useState('');
+
+  useEffect(() => {
+    api('/api/suppliers').then((d) => setSuppliers(d.suppliers || [])).catch(() => {});
+  }, []);
 
   useEffect(() => {
     api('/api/auth/me').then((d) => setRole(d?.user?.role || d?.role || null)).catch(() => setRole(null));
@@ -57,10 +69,17 @@ function Reports() {
     return p;
   }, [from, to]);
 
-  async function peek(key) {
+  // §29/§42 — supplier statements pick their supplier from a searchable select.
+  function paramsFor(r) {
+    if (!r.needsSupplier) return params;
+    return { ...params, ...(supplierId ? { supplier_id: supplierId } : {}) };
+  }
+
+  async function peekKey(key) {
+    const r = REPORTS.find((x) => x.key === key);
     setLoading(true); setPreview(null);
     try {
-      const qs = new URLSearchParams(params).toString();
+      const qs = new URLSearchParams(paramsFor(r)).toString();
       setPreview(await api('/api/reports/' + key + (qs ? '?' + qs : '')));
     } catch { setPreview(null); }
     setLoading(false);
@@ -85,9 +104,19 @@ function Reports() {
             <div style={{ fontWeight: 800, fontSize: 14.5 }}>{r.title}</div>
             <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>{r.desc}</div>
             {!r.dated && <div className="muted" style={{ fontSize: 11, marginTop: 6, fontStyle: 'italic' }}>Current position (not date-filtered)</div>}
+            {r.needsSupplier && (
+              <div style={{ marginTop: 10 }}>
+                <SearchableSelect
+                  value={supplierId}
+                  onChange={setSupplierId}
+                  options={suppliers.map((sp) => ({ value: sp.id, label: sp.name, sub: sp.code || '' }))}
+                  placeholder="Select supplier…"
+                />
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-              <ExportMenu report={r.key} params={params} formats={['pdf', 'excel', 'csv', 'print']} />
-              <button type="button" className="btn secondary sm" onClick={() => peek(r.key)} disabled={loading}>
+              <ExportMenu report={r.key} params={paramsFor(r)} formats={['pdf', 'excel', 'csv', 'print']} />
+              <button type="button" className="btn secondary sm" onClick={() => peekKey(r.key)} disabled={loading || (r.needsSupplier && !supplierId)}>
                 {loading ? '…' : 'Preview'}
               </button>
             </div>
