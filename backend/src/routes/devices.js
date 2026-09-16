@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { audit } from '../services/audit.js';
+import { queuePush, flushPushes } from '../services/push.js';
 import { asyncH } from '../middleware/errors.js';
 
 const r = Router();
@@ -41,6 +42,34 @@ r.patch('/:id/active', requireRole('admin'), asyncH(async (req, res) => {
   if (!rows[0]) return res.status(404).json({ error: 'Not found' });
   await audit(null, { userId: req.user.sub, action: 'push_device.' + (active ? 'activated' : 'deactivated'), entity: 'push_device', entityId: rows[0].id, details: { active }, ip: req.ip });
   res.json({ device: rows[0] });
+}));
+
+// §43 — this user's own registration status (tokens masked). Drives the
+// in-app push diagnostics screen; never exposes full tokens to clients.
+r.get('/me', asyncH(async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, device_id, platform, app_version, active,
+            CASE WHEN push_token IS NULL THEN NULL
+                 ELSE left(push_token, 8) || '…' || right(push_token, 6) END AS push_token_masked,
+            last_seen_at, created_at
+       FROM push_devices WHERE user_id = $1 ORDER BY last_seen_at DESC`, [req.user.sub]);
+  res.json({ devices: rows });
+}));
+
+// §43 — real-pipeline test: queues a push through notify→queue→Expo for the
+// CALLER's devices and flushes immediately. Admin only.
+r.post('/test', requireRole('admin'), asyncH(async (req, res) => {
+  const { rows: dev } = await pool.query(
+    'SELECT id FROM push_devices WHERE user_id = $1 AND active = true AND push_token IS NOT NULL', [req.user.sub]);
+  queuePush({
+    userId: req.user.sub,
+    title: 'Test notification',
+    body: `Push pipeline OK — ${new Date().toISOString().slice(0, 19).replace('T', ' ')} (server time).`,
+    data: { entity_type: 'test' },
+  });
+  await flushPushes();
+  await audit(null, { userId: req.user.sub, action: 'push.test_sent', entity: 'push_devices', details: { devices: dev.length } });
+  res.json({ devices_reachable: dev.length, sent: true });
 }));
 
 export default r;

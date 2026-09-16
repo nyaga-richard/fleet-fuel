@@ -34,6 +34,7 @@ export default function MoreScreen() {
       title: 'Control',
       items: [
         { icon: 'clipboard-check-outline', label: 'Approvals', sub: 'Requests, adjustments, excess', badge: pending, onPress: () => router.push('/approvals') },
+        { icon: 'shield-check-outline', label: 'Push diagnostics', sub: 'Token, permission, test notification', onPress: () => router.push('/push-diagnostics') },
       ],
     }] : []),
     {

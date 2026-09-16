@@ -270,11 +270,12 @@ export async function vehicleLedger(q) {
   const { rows } = await pool.query(
     `WITH fills AS (
        SELECT t.id, t.created_at, t.quantity::float AS litres, t.odometer::float AS odometer,
-              t.unit_price::float AS unit_price, t.status,
-              v.plate, v.make, v.model,
+              t.unit_price::float AS unit_price, t.status, t.source, t.destination,
+              u.name AS entered_by, v.plate, v.make, v.model,
               LAG(t.odometer::float) OVER (PARTITION BY t.vehicle_id ORDER BY t.odometer, t.created_at) AS prev_odo
          FROM fuel_transactions t
          JOIN vehicles v ON v.id = t.vehicle_id
+         LEFT JOIN users u ON u.id = t.operator_id
         ${'WHERE ' + where.join(' AND ')}
      )
      SELECT f.*, (f.odometer - f.prev_odo) AS distance
@@ -298,6 +299,9 @@ export async function vehicleLedger(q) {
       fuel_cost: cost,
       cost_per_km: distance && cost ? +(cost / distance).toFixed(2) : null,
       status: r.status,
+      source: r.source,
+      destination: r.destination,
+      entered_by: r.entered_by,
     };
   });
   const totL = data.reduce((a, r) => a + r.litres, 0);
@@ -321,6 +325,9 @@ export async function vehicleLedger(q) {
       { key: 'fuel_cost', label: `Fuel Cost (${profile.currency})`, type: 'money', width: 14 },
       { key: 'cost_per_km', label: `Cost/KM (${profile.currency})`, type: 'money', width: 13 },
       { key: 'status', label: 'Status', width: 10 },
+      { key: 'source', label: 'Source', width: 17 },
+      { key: 'destination', label: 'Destination', width: 16 },
+      { key: 'entered_by', label: 'Entered By', width: 15 },
     ],
     rows: data,
     summary: [
@@ -423,10 +430,12 @@ export async function fuelTransactions(q) {
   const where = [`t.status IN ('completed','reversed')`];
   if (q.vehicle_id) { params.push(uuidParam(q.vehicle_id, 'vehicle_id')); where.push(`t.vehicle_id = $${params.length}`); }
   if (q.fuel_type_id) { params.push(uuidParam(q.fuel_type_id, 'fuel_type_id')); where.push(`t.fuel_type_id = $${params.length}`); }
+  if (q.source) { params.push(String(q.source).toUpperCase()); where.push(`t.source = $${params.length}`); }
   where.push(...dateFilters(q, params, 't.created_at'));
   const profile = await orgProfile();
   const { rows } = await pool.query(
     `SELECT t.txn_no, t.created_at, v.plate, ft.name AS fuel_type, p.name AS pump, t2.name AS tank,
+            t.source, t.destination,
             t.quantity::float AS quantity, t.unit_price::float AS unit_price,
             (t.quantity * COALESCE(t.unit_price, 0))::float AS amount,
             t.odometer, u.name AS operator, r.request_no, t.status
@@ -442,7 +451,7 @@ export async function fuelTransactions(q) {
   const data = rows.map((r) => ({ ...r, amount: r.amount == null ? null : Number(r.amount) }));
   return {
     title: 'Fuel Transactions', orientation: 'landscape',
-    meta: { filters: filtersText(q, { vehicle_id: 'Vehicle', fuel_type_id: 'Fuel Type' }), org: profile },
+    meta: { filters: filtersText(q, { vehicle_id: 'Vehicle', fuel_type_id: 'Fuel Type', source: 'Source' }), org: profile },
     columns: [
       { key: 'created_at', label: 'Date', type: 'datetime', width: 19 },
       { key: 'txn_no', label: 'Transaction', width: 15 },
@@ -451,6 +460,8 @@ export async function fuelTransactions(q) {
       { key: 'fuel_type', label: 'Fuel Type', width: 12 },
       { key: 'pump', label: 'Pump', width: 12 },
       { key: 'tank', label: 'Tank', width: 13 },
+      { key: 'source', label: 'Source', width: 17 },
+      { key: 'destination', label: 'Destination', width: 16 },
       { key: 'quantity', label: 'Quantity (L)', type: 'number', width: 12 },
       { key: 'unit_price', label: `Unit Price (${profile.currency})`, type: 'money', width: 13 },
       { key: 'amount', label: `Amount (${profile.currency})`, type: 'money', width: 13 },

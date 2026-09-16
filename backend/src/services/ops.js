@@ -221,6 +221,137 @@ export async function issueFuel(client, { payload, userId }) {
   return { row: { ...inserted[0], balance_after: entry.balance_after }, duplicate: false };
 }
 
+/**
+ * §28–§36 Direct Fuel Entry — record fuel already issued WITHOUT a request.
+ * Never creates an approval; posts FUEL_ISSUE to the inventory ledger and is
+ * stamped source=DIRECT_ENTRY so reporting can distinguish it forever.
+ * §34 price rule: user-entered fueling price wins; blank → applicable cost
+ * price (last receipt price for the fuel type) — never 0, never NULL.
+ */
+export async function directFuelEntry(client, { payload, userId }) {
+  const clientUuid = payload.client_uuid || null;
+  const existing = await findByClientUuid(client, 'fuel_transactions', clientUuid);
+  if (existing) return { row: existing, duplicate: true, price_source: 'UNCHANGED' };
+
+  const qty = Number(payload.quantity);
+  if (!Number.isFinite(qty) || qty <= 0) throw new ApiError(400, 'quantity must be > 0');
+
+  // Vehicle + fuel type must be real and active.
+  const { rows: veh } = await client.query('SELECT id, plate, active FROM vehicles WHERE id = $1', [payload.vehicle_id]);
+  if (!veh.length) throw new ApiError(400, 'Vehicle not found');
+  if (!veh[0].active) throw new ApiError(400, 'Vehicle is inactive');
+  const { rows: ft } = await client.query('SELECT id, name, active FROM fuel_types WHERE id = $1', [payload.fuel_type_id]);
+  if (!ft.length) throw new ApiError(400, 'Fuel type not found');
+  if (!ft[0].active) throw new ApiError(400, 'Fuel type is inactive');
+
+  // Resolve pump → tank (or explicit tank). Tank's fuel must match.
+  let tankId = null;
+  let pumpId = null;
+  if (payload.pump_id) {
+    const { rows: pump } = await client.query('SELECT id, tank_id, active FROM pumps WHERE id = $1', [payload.pump_id]);
+    if (!pump.length) throw new ApiError(400, 'Pump not found');
+    if (!pump[0].active) throw new ApiError(400, 'Pump is inactive');
+    pumpId = pump[0].id;
+    tankId = pump[0].tank_id;
+  } else if (payload.tank_id) {
+    tankId = payload.tank_id;
+  } else {
+    throw new ApiError(400, 'Either pump_id or tank_id is required');
+  }
+  const { rows: tank } = await client.query('SELECT id, fuel_type_id, active FROM tanks WHERE id = $1', [tankId]);
+  if (!tank.length) throw new ApiError(400, 'Tank not found');
+  if (!tank[0].active) throw new ApiError(400, 'Tank is inactive');
+  if (tank[0].fuel_type_id !== payload.fuel_type_id) throw new ApiError(400, 'Tank does not hold that fuel type');
+
+  // §34 — applicable cost price = latest receipt price for this fuel type.
+  const { rows: costRow } = await client.query(
+    `SELECT unit_price FROM purchases
+      WHERE fuel_type_id = $1 AND unit_price IS NOT NULL AND unit_price > 0
+      ORDER BY created_at DESC LIMIT 1`, [payload.fuel_type_id]);
+  const costPrice = costRow.length ? Number(costRow[0].unit_price) : null;
+
+  let appliedPrice;
+  let priceSource;
+  if (payload.unit_price != null && payload.unit_price !== '' && Number(payload.unit_price) > 0) {
+    appliedPrice = Number(payload.unit_price);
+    priceSource = 'USER ENTERED';
+  } else {
+    if (costPrice == null) throw new ApiError(400, 'No cost price on record for this fuel type — enter a fueling price');
+    appliedPrice = costPrice;
+    priceSource = 'COST PRICE';
+  }
+
+  // Same physical-impossibility guard as issueFuel: stock never goes negative.
+  const { rows: bal } = await client.query(
+    `SELECT COALESCE(SUM(quantity),0)::float AS balance FROM inventory_transactions
+      WHERE fuel_type_id = $1 AND tank_id = $2`, [payload.fuel_type_id, tankId]);
+  if (bal[0].balance - qty < -0.001) {
+    throw new ApiError(409, `Insufficient fuel in tank: available ${bal[0].balance} L, requested ${qty} L`);
+  }
+
+  // Pump meter sanity: end must not be before start.
+  const pumpStart = payload.pump_start != null && payload.pump_start !== '' ? Number(payload.pump_start) : null;
+  const pumpEnd = payload.pump_end != null && payload.pump_end !== '' ? Number(payload.pump_end) : null;
+  if (pumpStart != null && pumpEnd != null && pumpEnd < pumpStart) {
+    throw new ApiError(400, 'Pump end reading cannot be less than the start reading');
+  }
+
+  const txnNo = await nextDocNumber(client, 'transaction');
+  const { rows: inserted } = await client.query(
+    `INSERT INTO fuel_transactions
+       (txn_no, request_id, authorization_id, vehicle_id, fuel_type_id, tank_id, pump_id,
+        quantity, unit_price, unit_cost, operator_id, odometer, status, client_uuid,
+        source, destination, purpose, remarks, pump_start, pump_end, created_at)
+     VALUES ($1,NULL,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,'DIRECT_ENTRY',$12,$13,$14,$15,$16,
+             COALESCE($17::timestamptz, now()))
+     RETURNING *`,
+    [txnNo, payload.vehicle_id, payload.fuel_type_id, tankId, pumpId,
+      qty, appliedPrice, costPrice, userId, payload.odometer ?? null,
+      clientUuid, payload.destination ?? null, payload.purpose ?? null, payload.remarks ?? null,
+      pumpStart, pumpEnd, payload.transaction_date ?? null]);
+
+  // THE LEDGER — same immutable negative issue entry as workflow issues.
+  const entry = await postLedgerEntry(client, {
+    entry_type: 'issue',
+    fuel_type_id: payload.fuel_type_id,
+    tank_id: tankId,
+    quantity: -qty,
+    ref_table: 'fuel_transactions',
+    ref_id: inserted[0].id,
+    description: `Direct entry ${qty} L — ${veh[0].plate}${payload.destination ? ` to ${payload.destination}` : ''}`,
+    performed_by: userId,
+  });
+
+  // Meter truth for reconciliation: record the end reading like a handover.
+  if (pumpId && pumpEnd != null) {
+    await client.query(
+      `INSERT INTO pump_readings (pump_id, reading, fuel_transaction_id, recorded_by, client_uuid, created_at)
+       VALUES ($1,$2,$3,$4,$5, COALESCE($6::timestamptz, now()))`,
+      [pumpId, pumpEnd, inserted[0].id, userId, clientUuid, payload.transaction_date ?? null]);
+  }
+
+  await audit(client, {
+    userId,
+    action: 'DIRECT_FUEL_ENTRY_CREATED',
+    entity: 'fuel_transactions', entityId: inserted[0].id,
+    details: { txn_no: txnNo, vehicle: veh[0].plate, quantity: qty, tank_id: tankId, pump_id: pumpId,
+      fueling_price: appliedPrice, price_source: priceSource, unit_cost: costPrice,
+      destination: payload.destination ?? null, ledger_entry: entry.id },
+  });
+
+  await notifyRoles(client, ['manager', 'admin'], {
+    type: 'fuel_entry.direct',
+    title: 'Direct fuel entry recorded',
+    message: `${veh[0].plate}: ${qty} L (${txnNo}) by direct entry — no request workflow.`,
+    entityType: 'fuel_transaction', entityId: inserted[0].id,
+    severity: 'INFO',
+    dedupKey: `fuel_entry.direct:${inserted[0].id}`,
+    metadata: { txn_no: txnNo, quantity: qty },
+  }, { excludeUserId: userId });
+
+  return { row: { ...inserted[0], balance_after: entry.balance_after }, duplicate: false, price_source: priceSource };
+}
+
 /** Reverse a completed issue (manager/admin) — restores stock, keeps history. */
 export async function reverseFuelTransaction(client, { transactionId, userId, reason }) {
   const { rows } = await client.query(`SELECT * FROM fuel_transactions WHERE id = $1 FOR UPDATE`, [transactionId]);

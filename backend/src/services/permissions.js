@@ -9,6 +9,8 @@ const ALL = [
   'reports:view', 'reports:export', 'audit_logs:view',
   // fuel requests
   'fuel_requests:view', 'fuel_requests:create', 'fuel_requests:approve', 'fuel_requests:reject',
+  // direct fuel entry (§28/§29) — bypasses the request workflow entirely
+  'fuel_entries:view', 'fuel_entries:create',
   // excess fuel
   'fuel_excess:approve', 'fuel_excess:reject',
   // inventory

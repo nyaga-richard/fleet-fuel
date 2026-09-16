@@ -61,6 +61,7 @@ export function useTabBarPad(extra = SP.lg) {
 // Horizontal padding is 16 (14 on very small devices) — computed, not random.
 export function Screen({ children, keyboard = false, scroll = false, pad = true, style }) {
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const padH = width < 350 ? SCREEN_PAD_SM : SCREEN_PAD;
 
   let body = <View style={[styles.flex, pad && { paddingHorizontal: padH }, style]}>{children}</View>;
@@ -68,7 +69,7 @@ export function Screen({ children, keyboard = false, scroll = false, pad = true,
     body = (
       <ScrollView
         style={styles.flex}
-        contentContainerStyle={[pad && { paddingHorizontal: padH, paddingTop: SP.sm }, { paddingBottom: SP.xxl }, style]}
+        contentContainerStyle={[pad && { paddingHorizontal: padH, paddingTop: SP.sm }, { paddingBottom: SP.xxl + insets.bottom }, style]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -386,7 +387,7 @@ export function Sheet({ visible, onClose, title, children, footer, maxHeight = '
                 <Icon name="close" size={ICON.lg} color={C.muted} />
               </TouchableOpacity>
             </View>
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, paddingTop: SP.md, paddingBottom: SP.xl }}>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, paddingTop: SP.md, paddingBottom: SP.xl + insets.bottom }}>
               {children}
             </ScrollView>
             {!!footer && (

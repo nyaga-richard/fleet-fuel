@@ -21,6 +21,7 @@ import reportsRoutes from './routes/reports.js';
 import notificationsRoutes from './routes/notifications.js';
 import approvalsRoutes from './routes/approvals.js';
 import devicesRoutes from './routes/devices.js';
+import fuelEntriesRoutes from './routes/fuel-entries.js';
 import { flushPushes } from './services/push.js';
 
 export function createApp() {
@@ -73,6 +74,7 @@ export function createApp() {
   app.use('/api/notifications', notificationsRoutes);
   app.use('/api/approvals', approvalsRoutes);
 app.use('/api/devices', devicesRoutes);
+app.use('/api/fuel-entries', fuelEntriesRoutes);
 
   app.use('/api', notFoundHandler);
   app.get('/', (_req, res) => res.json({ service: 'fleet-fuel-api', docs: '/api/health', version: config.version }));

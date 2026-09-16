@@ -460,3 +460,91 @@ test('§40 push wiring never breaks approvals (best-effort delivery)', async () 
   const list = await api('GET', '/api/devices');
   assert.equal(list.json.devices.filter((d) => d.device_id === 'e2e-push-dev').length, 1);
 });
+
+// ─── Direct fuel entry (§28–§41) + push diagnostics (§43) ───────────────────
+test('§28/§29/§34 direct fuel entry: permission-gated, price fallback, ledger, audit', async () => {
+  const att = await api('POST', '/api/users', { name: 'DE Attendant', email: `de-${uuid().slice(0, 8)}@test.local`, password: 'Attendant123!', role: 'attendant' });
+  const alogin = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: att.json.user.email, password: 'Attendant123!' }) });
+  const atok = (await alogin.json()).token;
+  const denied = await fetch(`${BASE}/api/fuel-entries/direct`, { method: 'POST', headers: { authorization: `Bearer ${atok}`, 'content-type': 'application/json' }, body: JSON.stringify({}) });
+  assert.equal(denied.status, 403, 'attendant denied direct entry');
+
+  const st0 = await api('GET', '/api/inventory/stock');
+  const bal0 = st0.json.by_tank?.[0]?.balance ?? st0.json.by_fuel_type?.[0]?.balance;
+
+  // blank fueling price → cost price applies (§34); unit_cost stays separate (§35)
+  const r1 = await api('POST', '/api/fuel-entries/direct', {
+    vehicle_id: vehicle.id, fuel_type_id: diesel.id, tank_id: tank.id,
+    quantity: 12.5, odometer: 5000, destination: 'Test Site', client_uuid: uuid(),
+  });
+  assert.equal(r1.status, 201, JSON.stringify(r1.json).slice(0, 140));
+  assert.equal(r1.json.price_source, 'COST PRICE');
+  assert.equal(Number(r1.json.entry.unit_price), Number(r1.json.entry.unit_cost), 'blank price → applied == cost');
+  assert.equal(r1.json.entry.source, 'DIRECT_ENTRY');
+
+  // user-entered price wins and unit_cost remains the inventory cost (§35)
+  const r2 = await api('POST', '/api/fuel-entries/direct', {
+    vehicle_id: vehicle.id, fuel_type_id: diesel.id, tank_id: tank.id,
+    quantity: 3, unit_price: 999.5, client_uuid: uuid(),
+  });
+  assert.equal(r2.status, 201);
+  assert.equal(r2.json.price_source, 'USER ENTERED');
+  assert.equal(Number(r2.json.entry.unit_price), 999.5);
+  assert.ok(Number(r2.json.entry.unit_cost) !== 999.5, 'unit_cost separate from fueling price');
+
+  // stock moved exactly by both entries
+  const st1 = await api('GET', '/api/inventory/stock');
+  const bal1 = st1.json.by_tank?.[0]?.balance ?? st1.json.by_fuel_type?.[0]?.balance;
+  assert.equal(Math.round((Number(bal0) - Number(bal1)) * 100) / 100, 15.5, 'stock reduced by 12.5 + 3');
+
+  // idempotent: same client_uuid returns the same entry
+  const dup = await api('POST', '/api/fuel-entries/direct', {
+    vehicle_id: vehicle.id, fuel_type_id: diesel.id, tank_id: tank.id,
+    quantity: 3, unit_price: 999.5, client_uuid: r2.json.entry.client_uuid,
+  });
+  assert.equal(dup.status, 200);
+  assert.equal(dup.json.entry.id, r2.json.entry.id, 'dup client_uuid → same row');
+
+  // validation: pump end before start
+  const bad = await api('POST', '/api/fuel-entries/direct', {
+    vehicle_id: vehicle.id, fuel_type_id: diesel.id, tank_id: tank.id,
+    quantity: 1, pump_start: 100, pump_end: 50, client_uuid: uuid(),
+  });
+  assert.equal(bad.status, 400, 'pump_end < pump_start rejected');
+
+  // appears in the DIRECT_ENTRY listing
+  const list = await api('GET', '/api/fuel-entries');
+  assert.equal(list.status, 200);
+  assert.ok(list.json.entries.some((e) => e.id === r1.json.entry.id));
+
+  // fuel-transactions report distinguishes the source (§37)
+  const rep = await api('GET', '/api/reports/fuel-transactions?source=DIRECT_ENTRY');
+  assert.equal(rep.status, 200);
+  assert.ok(rep.json.rows.every((r) => r.source === 'DIRECT_ENTRY'));
+  assert.ok(rep.json.columns.some((c) => c.key === 'source'));
+  // vehicle ledger rows carry source + entered_by (§38)
+  const vl = await api('GET', '/api/reports/vehicle-ledger');
+  assert.ok(vl.json.columns.some((c) => c.key === 'source') && vl.json.columns.some((c) => c.key === 'entered_by'));
+  const row = vl.json.rows.find((r) => r.id === r1.json.entry.id);
+  assert.ok(row, 'direct entry appears in vehicle ledger');
+  assert.equal(row.source, 'DIRECT_ENTRY');
+});
+
+test('§43 device diagnostics: /me masks tokens, /test is admin-only', async () => {
+  await api('POST', '/api/devices', { device_id: 'diag-dev-1', platform: 'android', push_token: 'ExponentPushToken[diagnostic-test]' });
+  const me = await api('GET', '/api/devices/me');
+  assert.equal(me.status, 200);
+  assert.ok(me.json.devices.some((d) => d.device_id === 'diag-dev-1'));
+  const tok = me.json.devices.find((d) => d.device_id === 'diag-dev-1').push_token_masked;
+  assert.ok(tok.includes('…'), 'token masked');
+  assert.ok(!tok.includes('diagnostic-test'), 'full token never returned');
+
+  const t = await api('POST', '/api/devices/test', {});
+  assert.equal(t.status, 200, 'admin test push returns 200');
+
+  const mgr = await api('POST', '/api/users', { name: 'Diag Manager', email: `dg-${uuid().slice(0, 8)}@test.local`, password: 'Manager123!', role: 'manager' });
+  const mlogin = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: mgr.json.user.email, password: 'Manager123!' }) });
+  const mtok = (await mlogin.json()).token;
+  const denied = await fetch(`${BASE}/api/devices/test`, { method: 'POST', headers: { authorization: `Bearer ${mtok}` } });
+  assert.equal(denied.status, 403, 'manager cannot send test pushes');
+});

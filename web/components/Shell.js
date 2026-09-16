@@ -23,6 +23,7 @@ const NAV = [
   { group: 'Operations', links: [
     { href: '/requests', label: 'Fuel Requests', roles: ['admin', 'manager', 'attendant'], icon: 'file', badge: 'requests' },
     { href: '/issue', label: 'Issue Fuel', roles: ['admin', 'manager', 'attendant'], icon: 'drop' },
+    { href: '/direct-entry', label: 'Direct Fuel Entry', roles: ['admin', 'manager'], icon: 'drop' },
     { href: '/vehicles', label: 'Vehicles', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },
   ]},
   { group: 'Inventory', links: [

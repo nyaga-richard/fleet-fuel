@@ -16,7 +16,7 @@ import { deviceId } from './db';
 import { api } from './api';
 
 let notifModule; // undefined = not tried yet, false = unavailable, object = ok
-function notificationsModule() {
+export function notificationsModule() {
   if (notifModule !== undefined) return notifModule;
   try {
     notifModule = require('expo-notifications');

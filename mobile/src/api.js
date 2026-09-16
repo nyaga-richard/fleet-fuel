@@ -73,6 +73,8 @@ export const api = {
   stock: () => request('/api/inventory/stock'),
   notifications: (limit = 100) => request(`/api/notifications?limit=${limit}`),
   registerDevice: (payload) => request('/api/devices', { method: 'POST', body: payload }),
+  myDevices: () => request('/api/devices/me'),
+  testPush: () => request('/api/devices/test', { method: 'POST', body: {} }),
   // Hermes has no URLSearchParams — build the query string by hand.
   ledgerReport: (params = {}) => {
     const parts = Object.entries(params)
