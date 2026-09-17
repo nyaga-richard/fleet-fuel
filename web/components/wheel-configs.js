@@ -34,7 +34,12 @@ function validateDraft(draft) {
   if (!draft.code?.trim()) errs.push('Code is required.');
   if (!draft.axles.length) errs.push('At least one axle is required.');
   draft.axles.forEach((ax, i) => {
-    if (!ax.duals && !(ax.positions?.L && ax.positions?.R)) errs.push(`Axle ${i + 1}: both LEFT and RIGHT positions are required.`);
+    // A fresh draft always implies LEFT+RIGHT (draftToPayload adds them);
+    // only validate real position rows (edit mode, side = LEFT/RIGHT).
+    if (Array.isArray(ax.positions) && ax.positions.length) {
+      const sides = new Set(ax.positions.map((p) => String(p.side || '').toUpperCase()));
+      if (!sides.has('LEFT') || !sides.has('RIGHT')) errs.push(`Axle ${i + 1}: both LEFT and RIGHT positions are required.`);
+    }
     if (ax.duals && ax.axle_type === 'STEERING') errs.push(`Axle ${i + 1}: steering axles cannot have dual wheels.`);
   });
   return errs;

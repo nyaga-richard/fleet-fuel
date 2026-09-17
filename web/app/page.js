@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Shell from '@/components/Shell';
 import { Card, PageHeader, Stat, DataTable, StatusPill, Notice, Skeleton, EmptyState } from '@/components/ui';
+import UsageAreaChart from '@/components/usage-area-chart';
 import { api } from '@/lib/api';
 import { fmtQty, fmtDateTime, fmtNum } from '@/lib/format';
 
@@ -71,9 +72,8 @@ function Dashboard() {
         />
       </div>
 
-      <Card title="Fuel issued — last 14 days" actions={<Link href="/ledger">Open ledger →</Link>}>
-        <UsageChart txns={txns} />
-      </Card>
+      <UsageAreaChart />
+      <div style={{ height: 2 }} />
 
       <Card title="Recent fuel transactions" actions={<Link href="/issue">Issue fuel →</Link>}>
         <DataTable
@@ -173,51 +173,5 @@ function StockCard({ s, tanks }) {
       pct={pct}
       tone={tone}
     />
-  );
-}
-
-// Compact SVG bar chart — 14 daily buckets, real transaction data.
-function UsageChart({ txns }) {
-  const days = useMemo(() => {
-    const out = [];
-    const now = new Date();
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * 86400000);
-      const key = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi' }).format(d);
-      out.push({ key, label: key.slice(5).replace('-', '/'), total: 0 });
-    }
-    for (const t of txns) {
-      if (t.status !== 'completed' || t.reversal_of) continue;
-      const key = String(t.created_at || '').slice(0, 10);
-      const bucket = out.find((o) => o.key === key);
-      if (bucket) bucket.total += Number(t.quantity || 0);
-    }
-    return out;
-  }, [txns]);
-
-  const max = Math.max(1, ...days.map((d) => d.total));
-  const W = 100; // viewBox width in units — responsive via CSS
-  const H = 42;
-  const bw = W / days.length;
-
-  return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H + 8}`} preserveAspectRatio="none" style={{ width: '100%', height: 130 }} role="img" aria-label="Daily fuel issued, last 14 days">
-        {days.map((d, i) => {
-          const h = (d.total / max) * H;
-          return (
-            <g key={d.key}>
-              <rect x={i * bw + bw * 0.15} y={H - h} width={bw * 0.7} height={Math.max(h, d.total > 0 ? 1.2 : 0.4)} rx="0.8" fill={d.total > 0 ? 'var(--accent)' : 'var(--panel-2)'} />
-              {i % 3 === 0 && (
-                <text x={i * bw + bw / 2} y={H + 6} textAnchor="middle" fontSize="3" fill="var(--muted)">{d.label}</text>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-        Peak day: {fmtQty(max)} · total 14 days: {fmtQty(days.reduce((a, d) => a + d.total, 0))}
-      </div>
-    </div>
   );
 }
