@@ -25,7 +25,7 @@ const UNIFIED_SQL = `
       FROM fuel_transactions t
       JOIN vehicles v ON v.id = t.vehicle_id
       LEFT JOIN users u ON u.id = t.operator_id
-     WHERE t.status = 'completed' AND t.odometer IS NOT NULL
+     WHERE t.status = 'completed'  -- include fills without odometer (distance simply unknown)
     UNION ALL
     SELECT e.vehicle_id, e.transaction_date, e.quantity::float,
            e.unit_price::float, e.odometer::float,
@@ -34,7 +34,7 @@ const UNIFIED_SQL = `
       FROM external_fuel_entries e
       JOIN vehicles v ON v.id = e.vehicle_id
       LEFT JOIN users u ON u.id = e.entered_by
-     WHERE e.odometer IS NOT NULL
+     WHERE 1=1  -- external entries without odometer still belong on the vehicle ledger
   )`;
 
 /** §5/§7 — unified Vehicle Fuel Ledger (both sources, one odometer order). */
@@ -72,7 +72,7 @@ export async function unifiedVehicleLedger(q) {
       date: r.created_at, registration: r.plate,
       vehicle: [r.make, r.model].filter(Boolean).join(' ') || null,
       source: r.source, reference: r.reference,
-      odometer: Number(r.odometer), distance, litres,
+      odometer: r.odometer != null ? Number(r.odometer) : null, distance, litres,
       km_per_l: kmL, l_per_100km: distance && litres > 0 ? +((litres / distance) * 100).toFixed(2) : null,
       unit_cost: r.unit_price, fuel_cost: cost,
       cost_per_km: distance && cost ? +(cost / distance).toFixed(2) : null,

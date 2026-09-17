@@ -1,163 +1,205 @@
 'use client';
-// Approvals (§24/§25/§28) — queue with tabs, detail drawer, decision with
-// required rejection reason (§23), immutable history (§28).
-import { useCallback, useEffect, useState } from 'react';
+// Approvals (§13/§20/§28) — the web decision interface. Managers/admins see
+// every pending approval (fuel requests, adjustments, …) and approve or
+// reject with a reason. Decisions hit the SAME server endpoints as the mobile
+// app (POST /api/approvals/:id/approve | /reject) and are final, auditable
+// legal records — reason is mandatory on reject.
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, Tabs, StatusPill, Skeleton, ConfirmDialog, Drawer, EmptyState } from '@/components/ui';
+import { Card, PageHeader, StatusPill, Notice, Skeleton, Drawer, ConfirmDialog, EmptyState } from '@/components/ui';
 import { api } from '@/lib/api';
-import { fmtDateTime, fmtQty, fmtKES } from '@/lib/format';
-
-const TABS = [
-  { value: 'ALL', label: 'All' },
-  { value: 'PENDING', label: 'Pending' },
-  { value: 'APPROVED', label: 'Approved' },
-  { value: 'REJECTED', label: 'Rejected' },
-];
+import { useAuth } from '@/lib/auth';
+import { fmtDateTime, fmtQty } from '@/lib/format';
 
 export default function ApprovalsPage() {
   return <Shell><Approvals /></Shell>;
 }
 
 function Approvals() {
-  const [tab, setTab] = useState('PENDING');
-  const [data, setData] = useState(null);
+  const { user } = useAuth();
+  const [rows, setRows] = useState(null);
+  const [counts, setCounts] = useState({});
+  const [filter, setFilter] = useState('PENDING');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
-  const [detail, setDetail] = useState(null);      // full approval + history
-  const [rejecting, setRejecting] = useState(null); // approval being rejected
+  const [decide, setDecide] = useState(null); // { approval, decision }
   const [reason, setReason] = useState('');
+  const [detail, setDetail] = useState(null);
 
-  const load = useCallback(async () => {
+  const isDecider = user?.role === 'admin' || user?.role === 'manager';
+
+  const load = useCallback(() => {
+    api(`/api/approvals?status=${filter}&pageSize=100`)
+      .then((d) => { setRows(d.approvals || []); setCounts(d.counts || {}); })
+      .catch((e) => setError(e.message));
+  }, [filter]);
+  useEffect(() => { if (isDecider) load(); }, [load, isDecider]);
+
+  async function submitDecision() {
+    if (!decide) return;
+    if (decide.decision === 'REJECTED' && !reason.trim()) { setError('A reason is required to reject.'); return; }
     setBusy(true); setError('');
     try {
-      const qs = tab === 'ALL' ? '' : `?status=${tab}`;
-      setData(await api('/api/approvals' + qs));
-    } catch (e) { setError(e.message); setData(null); }
-    finally { setBusy(false); }
-  }, [tab]);
-
-  useEffect(() => { load(); }, [load]);
-
-  async function openDetail(id) {
-    try { setDetail(await api('/api/approvals/' + id)); } catch { /* keep */ }
+      await api(`/api/approvals/${decide.approval.id}/${decide.decision === 'REJECTED' ? 'reject' : 'approve'}`, {
+        method: 'POST', body: reason.trim() ? { reason: reason.trim() } : {},
+      });
+      setNotice(`${decide.decision === 'APPROVED' ? 'Approved' : 'Rejected'} — ${entityLabel(decide.approval)}.`);
+      setDecide(null); setReason('');
+      load();
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
-  async function decide(id, decision) {
-    setBusy(true); setError('');
-    try {
-      const body = decision === 'REJECTED' ? { reason } : {};
-      await api(`/api/approvals/${id}/${decision.toLowerCase()}`, { method: 'POST', body });
-      setDetail(null); setRejecting(null); setReason('');
-      await load();
-    } catch (e) { setError(e.message); }
-    finally { setBusy(false); }
+  async function openDetail(a) {
+    try { setDetail(await api(`/api/approvals/${a.id}`)); } catch (e) { setError(e.message); }
   }
 
-  const counts = data?.counts || {};
-  const rows = data?.approvals || [];
+  const chips = useMemo(() => ([
+    { key: 'PENDING', label: `Pending (${counts.PENDING || 0})` },
+    { key: 'APPROVED', label: `Approved (${counts.APPROVED || 0})` },
+    { key: 'REJECTED', label: `Rejected (${counts.REJECTED || 0})` },
+    { key: '', label: 'All' },
+  ]), [counts]);
+
+  if (!isDecider) {
+    return <Shell><Notice kind="info">Only managers and administrators can approve or reject.</Notice></Shell>;
+  }
+  if (!rows && !error) return <Shell><Skeleton /></Shell>;
 
   return (
     <>
-      <PageHeader
-        title="Approvals"
-        subtitle="Requests, excess fuel, adjustments and variances awaiting a decision"
-      />
-      <Card>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-          <Tabs tabs={TABS.map((t) => ({ ...t, label: t.value === 'ALL' ? 'All' : `${t.label}${counts[t.value] != null ? ` (${counts[t.value]})` : ''}` }))} value={tab} onChange={setTab} />
-          {error && <span style={{ color: 'var(--red)', fontSize: 12 }} role="alert">{error}</span>}
-        </div>
+      <PageHeader title="Approvals" subtitle="Fuel requests, adjustments and other decisions awaiting you. Decisions are final and audited." />
+      {error && <Notice kind="error" onDone={() => setError('')}>{error}</Notice>}
+      {notice && <Notice kind="success" onDone={() => setNotice('')}>{notice}</Notice>}
 
-        {!data ? <Skeleton lines={8} /> : rows.length === 0 ? (
-          <EmptyState icon="check-circle" title="Nothing here" message={tab === 'PENDING' ? 'No pending approvals — you are all caught up.' : 'No records for this filter.'} />
-        ) : (
-          <div className="dt-tablewrap">
-            <table className="tbl sticky">
-              <thead>
-                <tr>
-                  <th>Type</th><th>Reference</th><th>Requested by</th><th className="num">Quantity</th>
-                  <th>Date</th><th>Status</th><th>Decided by</th><th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((a) => (
-                  <tr key={a.id} className="clickable" onClick={() => openDetail(a.id)}>
-                    <td>{a.entity_type.replace(/_/g, ' ')}</td>
-                    <td className="mono">{String(a.entity_id).slice(0, 8)}</td>
-                    <td>{a.requested_by_name || '—'}</td>
-                    <td className="num">{a.quantity != null ? fmtQty(a.quantity) : '—'}</td>
-                    <td className="nowrap">{fmtDateTime(a.created_at)}</td>
-                    <td><StatusPill status={a.status.toLowerCase()} /></td>
-                    <td>{a.decided_by_name || '—'}</td>
-                    <td className="nowrap">
-                      {a.status === 'PENDING' && (
-                        <>
-                          <button className="btn sm" disabled={busy} onClick={(e) => { e.stopPropagation(); decide(a.id, 'APPROVED'); }}>Approve</button>{' '}
-                          <button className="btn danger sm" disabled={busy} onClick={(e) => { e.stopPropagation(); setRejecting(a); }}>Reject</button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        {chips.map((c) => (
+          <button key={c.key} className={'btn sm ' + (filter === c.key ? '' : 'secondary')} onClick={() => { setFilter(c.key); setRows(null); }}>
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      {rows?.length ? (
+        <div style={{ display: 'grid', gap: 10 }}>
+          {rows.map((a) => <ApprovalCard key={a.id} a={a} onDecide={setDecide} onOpen={() => openDetail(a)} />)}
+        </div>
+      ) : (
+        <Card>
+          <EmptyState icon="✓" title={filter === 'PENDING' ? 'Nothing waiting on you' : 'No records'} message="New approval requests appear here the moment they are submitted." />
+        </Card>
+      )}
+
+      {/* reason + confirm */}
+      <ConfirmDialog
+        open={!!decide}
+        title={decide?.decision === 'APPROVED' ? 'Approve' : 'Reject'}
+        message={decide ? `${entityLabel(decide.approval)} — this decision is final and recorded in the audit trail.` : ''}
+        confirmLabel={decide?.decision === 'APPROVED' ? 'Approve' : 'Reject'}
+        danger={decide?.decision === 'REJECTED'}
+        busy={busy}
+        onConfirm={submitDecision}
+        onCancel={() => { setDecide(null); setReason(''); }}
+      >
+        {decide?.decision === 'REJECTED' && (
+          <div style={{ marginTop: 10 }}>
+            <label className="muted" style={{ fontSize: 12.5 }}>Reason (required, shown to the requester)</label>
+            <textarea
+              value={reason} onChange={(e) => setReason(e.target.value)} rows={3} autoFocus
+              style={{ width: '100%', marginTop: 4 }} placeholder="e.g. Tank stock too low for this quantity"
+            />
           </div>
         )}
-      </Card>
+        {decide?.decision === 'APPROVED' && (
+          <div style={{ marginTop: 10 }}>
+            <label className="muted" style={{ fontSize: 12.5 }}>Comment (optional)</label>
+            <input value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: '100%', marginTop: 4 }} />
+          </div>
+        )}
+      </ConfirmDialog>
 
-      <Drawer open={!!detail} onClose={() => setDetail(null)} title="Approval details" subtitle={detail?.approval?.entity_type?.replace(/_/g, ' ')}>
+      {/* full detail + event trail */}
+      <Drawer open={!!detail} onClose={() => setDetail(null)} title={detail ? entityLabel(detail.approval) : ''} subtitle={detail ? `Requested ${fmtDateTime(detail.approval.created_at)}` : ''} width={480}>
         {detail && (
           <>
-            <div className="kv">
-              {[
-                ['Status', detail.approval.status],
-                ['Type', detail.approval.entity_type.replace(/_/g, ' ')],
-                ['Requested by', detail.approval.requested_by_name || '—'],
-                ['Quantity', detail.approval.quantity != null ? fmtQty(detail.approval.quantity) : '—'],
-                ['Submitted', fmtDateTime(detail.approval.created_at)],
-                ['Decided by', detail.approval.decided_by_name || '—'],
-                ['Decided at', detail.approval.decided_at ? fmtDateTime(detail.approval.decided_at) : '—'],
-                ['Decision reason', detail.approval.reason || '—'],
-              ].map(([k, v]) => <div className="kv-row" key={k}><span className="kv-k">{k}</span><span className="kv-v">{v}</span></div>)}
+            <div style={{ display: 'grid', gap: 8, fontSize: 13 }}>
+              <KV k="Status" v={<StatusPill status={detail.approval.status} />} />
+              {detail.approval.quantity != null && <KV k="Quantity" v={`${fmtQty(detail.approval.quantity)} L`} />}
+              {detail.approval.previous_status && <KV k="Status change" v={`${detail.approval.previous_status} → ${detail.approval.new_status || '—'}`} />}
+              {detail.approval.reason && <KV k="Reason" v={detail.approval.reason} />}
+              <KV k="Requested by" v={detail.approval.requested_by_name || '—'} />
+              {detail.approval.decided_at && <KV k="Decided by" v={`${detail.approval.decided_by_name || '—'} · ${fmtDateTime(detail.approval.decided_at)}`} />}
+              {detail.approval.payload && Object.keys(detail.approval.payload).length > 0 && (
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+                  {Object.entries(detail.approval.payload).slice(0, 8).map(([k, v]) => (
+                    <KV key={k} k={k.replaceAll('_', ' ')} v={String(v ?? '—')} />
+                  ))}
+                </div>
+              )}
             </div>
-
-            <h4 style={{ margin: '14px 0 6px' }}>Approval history</h4>
-            {detail.history.map((e) => (
-              <div key={e.id} style={{ borderLeft: '2px solid var(--border)', paddingLeft: 10, marginBottom: 10 }}>
-                <div style={{ fontSize: 12, fontWeight: 700 }}>{e.action} — {e.actor_name || 'system'}</div>
-                <div className="muted" style={{ fontSize: 11.5 }}>{fmtDateTime(e.created_at)}</div>
-                {e.reason && <div style={{ fontSize: 12, marginTop: 2 }}>Reason: {e.reason}</div>}
-              </div>
-            ))}
-
+            <h4 style={{ margin: '14px 0 6px', fontSize: 13 }}>Event trail</h4>
+            <div style={{ display: 'grid', gap: 6, fontSize: 12.5 }}>
+              {(detail.history || []).map((e) => (
+                <div key={e.id} className="mini-row" style={{ alignItems: 'baseline' }}>
+                  <b style={{ textTransform: 'capitalize' }}>{String(e.action).replaceAll('.', ' · ')}</b>
+                  <span className="muted" style={{ flex: 1, textAlign: 'right' }}>{e.actor_name || ''} {fmtDateTime(e.created_at)}</span>
+                </div>
+              ))}
+            </div>
             {detail.approval.status === 'PENDING' && (
-              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <button className="btn" disabled={busy} onClick={() => decide(detail.approval.id, 'APPROVED')}>Approve</button>
-                <button className="btn danger" disabled={busy} onClick={() => setRejecting(detail.approval)}>Reject…</button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+                <button className="btn success" onClick={() => { setDecide({ approval: detail.approval, decision: 'APPROVED' }); setDetail(null); }}>Approve</button>
+                <button className="btn danger" onClick={() => { setDecide({ approval: detail.approval, decision: 'REJECTED' }); setReason(''); setDetail(null); }}>Reject…</button>
               </div>
             )}
           </>
         )}
       </Drawer>
-
-      <ConfirmDialog
-        open={!!rejecting}
-        title="Reject approval"
-        message={rejecting ? `Reject this ${rejecting.entity_type.replace(/_/g, ' ')}? A reason is required.` : ''}
-        confirmLabel="Reject"
-        danger
-        busy={busy}
-        onConfirm={() => rejecting && decide(rejecting.id, 'REJECTED')}
-        onCancel={() => { setRejecting(null); setReason(''); }}
-      >
-        <textarea
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder="Reason for rejection (required)…"
-          rows={3}
-          style={{ width: '100%', marginTop: 8 }}
-        />
-      </ConfirmDialog>
     </>
+  );
+}
+
+function ApprovalCard({ a, onDecide, onOpen }) {
+  return (
+    <Card>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 3 }}>
+            <b style={{ textTransform: 'capitalize', fontSize: 13.5 }}>{entityLabel(a)}</b>
+            <StatusPill status={a.status} />
+          </div>
+          <div className="muted" style={{ fontSize: 12.5 }}>
+            {a.quantity != null && <>Quantity <b style={{ color: 'var(--text)' }}>{fmtQty(a.quantity)} L</b> · </>}
+            Requested by <b style={{ color: 'var(--text)' }}>{a.requested_by_name || '—'}</b> · {fmtDateTime(a.created_at)}
+          </div>
+          {a.reason && <div className="muted" style={{ fontSize: 12, marginTop: 3, fontStyle: 'italic' }}>“{a.reason}”</div>}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn secondary sm" onClick={onOpen}>Details</button>
+          {a.status === 'PENDING' && (
+            <>
+              <button className="btn success sm" onClick={() => onDecide({ approval: a, decision: 'APPROVED' })}>Approve</button>
+              <button className="btn danger sm" onClick={() => onDecide({ approval: a, decision: 'REJECTED' })}>Reject…</button>
+            </>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function entityLabel(a) {
+  const t = String(a.entity_type || 'approval').replaceAll('_', ' ');
+  const p = a.payload || {};
+  return `${t}${p.request_no ? ` ${p.request_no}` : ''}${p.plate ? ` · ${p.plate}` : ''}`;
+}
+
+function KV({ k, v }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+      <span className="muted" style={{ textTransform: 'capitalize' }}>{k}</span>
+      <b style={{ textAlign: 'right' }}>{v}</b>
+    </div>
   );
 }

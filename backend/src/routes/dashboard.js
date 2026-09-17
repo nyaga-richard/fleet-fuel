@@ -45,7 +45,19 @@ router.get('/usage', asyncH(async (req, res) => {
        LEFT JOIN external e ON e.d = c.d
       ORDER BY c.d`, [days]);
 
-  res.json({ days, series: rows });
+  // Per-fuel-type split for the donut card (last 30 days, both sources).
+  const { rows: byFuel } = await pool.query(
+    `SELECT ft.name, COALESCE(SUM(x.litres), 0)::float AS litres
+       FROM (SELECT fuel_type_id, quantity AS litres FROM fuel_transactions
+              WHERE status = 'completed' AND reversal_of IS NULL
+                AND created_at::date >= CURRENT_DATE - 29
+             UNION ALL
+             SELECT fuel_type_id, quantity FROM external_fuel_entries
+              WHERE transaction_date::date >= CURRENT_DATE - 29) x
+       JOIN fuel_types ft ON ft.id = x.fuel_type_id
+      GROUP BY ft.name ORDER BY litres DESC`);
+
+  res.json({ days, series: rows, by_fuel_type: byFuel });
 }));
 
 export default router;

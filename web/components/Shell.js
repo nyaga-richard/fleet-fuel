@@ -27,6 +27,7 @@ const NAV = [
     { href: '/direct-entry', label: 'Direct Fuel Entry', roles: ['admin', 'manager'], icon: 'drop' },
     { href: '/external-fuel', label: 'External Fuel', roles: ['admin', 'manager'], icon: 'drop' },
     { href: '/trips', label: 'Trips', roles: ['admin', 'manager'], icon: 'file' },
+    { href: '/approvals', label: 'Approvals', roles: ['admin', 'manager'], icon: 'file' },
   ]},
   { group: 'Fleet', links: [
     { href: '/vehicles', label: 'Vehicles', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },

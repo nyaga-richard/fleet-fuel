@@ -51,7 +51,7 @@ function draftToPayload(draft) {
     code: draft.code.trim().toLowerCase(),
     name: draft.name.trim() || null,
     axles: draft.axles.map((ax, i) => {
-      const sides = ['L', 'R'];
+      const sides = ['LEFT', 'RIGHT'];
       const positions = [];
       for (const side of sides) {
         if (ax.duals) {

@@ -20,6 +20,7 @@ import { requireAuth, requirePerm } from '../middleware/auth.js';
 import { asyncH, bad, notFound } from '../middleware/errors.js';
 import { needStr, needUuid, needNum, optStr, optNum, optUuid, isUuid } from '../middleware/validate.js';
 import { audit } from '../services/audit.js';
+import { findByClientUuid, postLedgerEntry } from '../services/ledger.js';
 import { nextDocNumber } from '../services/numbering.js';
 
 const router = Router();
@@ -192,6 +193,143 @@ router.get('/:id/ledger', requirePerm('supplier_ledger:view'), asyncH(async (req
     closing_balance: +running.toFixed(2),
     entries,
   });
+}));
+
+
+// ── Purchase invoices with line items (§20/§21) ─────────────────────────────
+// One invoice = one payable ledger entry for the total. FUEL items may also
+// receive into a tank (inventory receipt per item) — no duplicate records:
+// the ledger entry's source is this invoice.
+router.post('/:id/invoices', requirePerm('suppliers:update'), asyncH(async (req, res) => {
+  if (!isUuid(req.params.id)) throw notFound('Supplier not found');
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!items.length) throw bad('At least one invoice item is required');
+  if (items.length > 50) throw bad('A invoice can have at most 50 items');
+  const invoiceNo = optStr(req.body, 'invoice_no', { max: 60 }) || null;
+  const invoiceDate = optStr(req.body, 'invoice_date', { max: 20 }) || undefined;
+  const dueDate = optStr(req.body, 'due_date', { max: 20 }) || null;
+  const notes = optStr(req.body, 'notes', { max: 500 }) || null;
+  const clientUuid = optUuid(req.body, 'client_uuid');
+  const entryDate = optStr(req.body, 'invoice_date', { max: 20 });
+
+  const { row: invoice, ledger: ledgerEntry, itemRows } = await tx(async (client) => {
+    const sup = await supplierOrNull(client, req.params.id);
+    if (!sup) throw notFound('Supplier not found');
+    const existing = await findByClientUuid(client, 'supplier_invoices', clientUuid);
+    if (existing) {
+      const { rows: it } = await client.query('SELECT * FROM supplier_invoice_items WHERE invoice_id = $1 ORDER BY id', [existing.id]);
+      return { row: existing, ledger: null, itemRows: it };
+    }
+
+    // Validate + total the items first (no writes until everything checks out).
+    let total = 0;
+    const prepared = [];
+    for (const [i, it] of items.entries()) {
+      const itemType = String(it.item_type || 'OTHER').toUpperCase();
+      if (!['FUEL', 'TIRE', 'PARTS', 'SERVICE', 'OTHER'].includes(itemType)) {
+        throw bad(`Item ${i + 1}: item_type must be FUEL, TIRE, PARTS, SERVICE or OTHER`);
+      }
+      const qty = Number(it.quantity);
+      const price = Number(it.unit_price);
+      if (!Number.isFinite(qty) || qty <= 0) throw bad(`Item ${i + 1}: quantity must be > 0`);
+      if (!Number.isFinite(price) || price < 0) throw bad(`Item ${i + 1}: unit_price must be >= 0`);
+      let fuelTypeId = null, tankId = null;
+      if (itemType === 'FUEL') {
+        if (!isUuid(String(it.fuel_type_id || ''))) throw bad(`Item ${i + 1}: fuel_type_id is required for fuel items`);
+        const { rows: ft } = await client.query('SELECT id, name FROM fuel_types WHERE id = $1 AND active = true', [it.fuel_type_id]);
+        if (!ft.length) throw bad(`Item ${i + 1}: fuel type not found or inactive`);
+        fuelTypeId = ft[0].id;
+        if (it.tank_id != null && it.tank_id !== '') {
+          if (!isUuid(String(it.tank_id))) throw bad(`Item ${i + 1}: tank_id must be a valid id`);
+          const { rows: tk } = await client.query('SELECT id, fuel_type_id, active FROM tanks WHERE id = $1', [it.tank_id]);
+          if (!tk.length) throw bad(`Item ${i + 1}: tank not found`);
+          if (!tk[0].active) throw bad(`Item ${i + 1}: tank is inactive`);
+          if (tk[0].fuel_type_id !== fuelTypeId) throw bad(`Item ${i + 1}: tank does not hold ${ft[0].name}`);
+          tankId = tk[0].id;
+        }
+      }
+      const amount = +(qty * price).toFixed(2);
+      total += amount;
+      prepared.push({ itemType, fuelTypeId, tankId, description: optStr(it, 'description', { max: 200 }) || (itemType === 'FUEL' ? 'Fuel' : itemType), qty, price, amount });
+    }
+    total = +total.toFixed(2);
+
+    const docNo = invoiceNo || await nextDocNumber(client, 'supplier_invoice');
+    const { rows: inv } = await client.query(
+      `INSERT INTO supplier_invoices
+         (supplier_id, invoice_no, invoice_date, due_date, total, status, notes, client_uuid, created_by)
+       VALUES ($1,$2,COALESCE($3::date, CURRENT_DATE),$4,$5,'POSTED',$6,$7,$8) RETURNING *`,
+      [req.params.id, docNo, invoiceDate, dueDate, total, notes, clientUuid, req.user.sub]);
+    const { rows: itemRows } = await client.query(
+      `INSERT INTO supplier_invoice_items
+         (invoice_id, item_type, fuel_type_id, tank_id, description, quantity, unit_price, amount)
+       SELECT $1,* FROM unnest($2::text[], $3::uuid[], $4::uuid[], $5::text[], $6::numeric[], $7::numeric[], $8::numeric[])
+       RETURNING *`,
+      [inv[0].id,
+       prepared.map((p) => p.itemType), prepared.map((p) => p.fuelTypeId), prepared.map((p) => p.tankId),
+       prepared.map((p) => p.description), prepared.map((p) => p.qty), prepared.map((p) => p.price), prepared.map((p) => p.amount)]);
+
+    // FUEL items with a tank: receive into inventory (receipt per item).
+    for (const p of prepared) {
+      if (p.itemType === 'FUEL' && p.tankId) {
+        // Stock movement via the SAME postLedgerEntry path receipts use
+        // (entry_type 'receipt', performed_by — columns match the schema).
+        await postLedgerEntry(client, {
+          entry_type: 'receipt',
+          fuel_type_id: p.fuelTypeId,
+          tank_id: p.tankId,
+          quantity: p.qty,
+          ref_table: 'supplier_invoices',
+          ref_id: inv[0].id,
+          description: `Invoice ${docNo} — ${p.description} from ${sup.name}`,
+          performed_by: req.user.sub,
+        });
+        // Price truth for cost-price lookups (same table receipts use).
+        await client.query(
+          `INSERT INTO purchases (receipt_no, supplier, invoice_no, fuel_type_id, tank_id, quantity, unit_price, received_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [`SINV-${docNo}`, sup.name, docNo, p.fuelTypeId, p.tankId, p.qty, p.price, req.user.sub]);
+      }
+    }
+
+    // ONE payable ledger entry for the invoice total (DEBIT increases payable).
+    const { rows: led } = await client.query(
+      `INSERT INTO supplier_ledger_entries
+         (supplier_id, entry_type, entry_date, reference, description, debit, source_table, source_id, created_by)
+       VALUES ($1,'PURCHASE',COALESCE($2::date, CURRENT_DATE),$3,$4,$5,'supplier_invoices',$6,$7) RETURNING *`,
+      [req.params.id, entryDate, docNo,
+        `Purchase invoice ${docNo} — ${prepared.map((p) => p.description).join(', ')}`.slice(0, 300),
+        total, inv[0].id, req.user.sub]);
+
+    await audit(client, { userId: req.user.sub, action: 'supplier.invoice', entity: 'supplier_invoices', entityId: inv[0].id,
+      details: { supplier: sup.name, invoice_no: docNo, total, items: prepared.length }, ip: req.ip });
+    return { row: inv[0], ledger: led[0], itemRows };
+  });
+
+  res.status(201).json({ invoice, items: itemRows, ledger: ledgerEntry });
+}));
+
+router.get('/:id/invoices', requirePerm('suppliers:view'), asyncH(async (req, res) => {
+  if (!isUuid(req.params.id)) throw notFound('Supplier not found');
+  const { rows } = await pool.query(
+    `SELECT i.*, (SELECT count(*)::int FROM supplier_invoice_items x WHERE x.invoice_id = i.id) AS item_count
+       FROM supplier_invoices i WHERE i.supplier_id = $1 ORDER BY i.invoice_date DESC, i.created_at DESC LIMIT 200`,
+    [req.params.id]);
+  res.json({ invoices: rows });
+}));
+
+router.get('/:id/invoices/:invoiceId', requirePerm('suppliers:view'), asyncH(async (req, res) => {
+  if (!isUuid(req.params.invoiceId)) throw notFound('Invoice not found');
+  const { rows } = await pool.query(
+    `SELECT i.*, s.name AS supplier_name, s.code AS supplier_code, u.name AS created_by_name
+       FROM supplier_invoices i JOIN suppliers s ON s.id = i.supplier_id
+       LEFT JOIN users u ON u.id = i.created_by
+      WHERE i.id = $1 AND i.supplier_id = $2`, [req.params.invoiceId, req.params.id]);
+  if (!rows.length) throw notFound('Invoice not found');
+  const { rows: items } = await pool.query(
+    'SELECT x.*, ft.name AS fuel_type_name FROM supplier_invoice_items x LEFT JOIN fuel_types ft ON ft.id = x.fuel_type_id WHERE x.invoice_id = $1 ORDER BY x.id',
+    [req.params.invoiceId]);
+  res.json({ invoice: rows[0], items });
 }));
 
 // ── Purchases (§20/§21) — one authoritative payable entry per invoice ────────

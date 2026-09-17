@@ -19,6 +19,20 @@ export const POSITIONS_BY_CONFIG_SQL = `
     FROM wheel_configuration_positions p`;
 
 /** Default display name from structure (§3/§4): "Rear Left Outer". */
+// Tolerant inputs (§51 robustness): L/R, left/right, I/O, inner/outer…
+const sideAlias = (v) => {
+  const s = String(v ?? '').trim().toUpperCase();
+  if (s === 'L' || s === 'LEFT') return 'LEFT';
+  if (s === 'R' || s === 'RIGHT') return 'RIGHT';
+  return s;
+};
+const wheelPosAlias = (v) => {
+  const s = String(v ?? '').trim().toUpperCase();
+  if (s === 'I' || s === 'INNER') return 'INNER';
+  if (s === 'O' || s === 'OUTER') return 'OUTER';
+  return s || 'SINGLE';
+};
+
 function defaultDisplay(axleNumber, axleCount, side, wheelPosition) {
   let axleWord;
   if (axleNumber === 1) axleWord = 'Front';
@@ -66,14 +80,14 @@ export function normalizeConfiguration(payload) {
 
     const positionsIn = Array.isArray(a.positions) ? a.positions : [];
     if (!positionsIn.length) throw bad(`Axle ${axleNumber} has no wheel positions`);
-    const sides = new Set(positionsIn.map((p) => String(p.side ?? '').toUpperCase()));
+    const sides = new Set(positionsIn.map((p) => sideAlias(p.side)));
     for (const s of sides) if (!SIDES.includes(s)) throw bad(`Axle ${axleNumber}: side must be LEFT or RIGHT`);
     if (!SIDES.every((s) => sides.has(s))) throw bad(`Axle ${axleNumber} is missing a side — every axle needs LEFT and RIGHT (§8)`);
 
     const positions = [];
     for (const p of positionsIn) {
-      const side = String(p.side ?? '').toUpperCase();
-      const wheelPosition = String(p.wheel_position ?? p.position ?? 'SINGLE').toUpperCase();
+      const side = sideAlias(p.side);
+      const wheelPosition = wheelPosAlias(p.wheel_position ?? p.position);
       if (!WHEEL_POSITIONS.includes(wheelPosition)) throw bad(`Axle ${axleNumber}: wheel position must be INNER, OUTER or SINGLE`);
       const slot = `${axleNumber}|${side}|${wheelPosition}`;
       if (seenSlots.has(slot)) throw bad(`Duplicate tire position: axle ${axleNumber} ${side} ${wheelPosition} (§8)`);

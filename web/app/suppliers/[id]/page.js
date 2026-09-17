@@ -6,6 +6,7 @@
 // Ledger convention (§19/§46): DEBIT increases payable, CREDIT decreases.
 // Entries are append-only; corrections happen through reversals (§26).
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import Shell from '@/components/Shell';
 import { Card, PageHeader, DataTable, StatusPill, Notice, Skeleton, Field, Drawer, Stat, ExportMenu, SearchableSelect, ConfirmDialog, EmptyState, useForm } from '@/components/ui';
@@ -96,6 +97,7 @@ function SupplierDetail() {
         actions={canPay && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <ExportMenu report="supplier-statement" params={{ supplier_id: id, ...(range.from ? { from: range.from } : {}), ...(range.to ? { to: range.to } : {}) }} />
+            <button className="btn secondary" onClick={() => setDrawer('invoice')}>+ Invoice</button>
             <button className="btn secondary" onClick={() => setDrawer('purchase')}>+ Purchase</button>
             <button className="btn secondary" onClick={() => setDrawer('adjustment')}>+ Adjustment</button>
             <button className="btn" onClick={() => setDrawer('payment')}>Record payment</button>
@@ -135,6 +137,12 @@ function SupplierDetail() {
           ? <DataTable columns={entryColumns} rows={ledger.entries} onRowClick={setDrill} pageSize={15} />
           : <EmptyState title="No ledger entries" message="Record an opening balance or the first purchase to start the ledger." />}
       </Card>
+
+      {drawer === 'invoice' && (
+        <InvoiceDrawer id={id} busy={busy} setBusy={setBusy}
+          onClose={() => setDrawer(null)} onDone={(m) => { setNotice(m); setDrawer(null); load(); }} setError={setError} />
+      )}
+      <InvoicesCard id={id} refreshKey={notice} onOpenError={setError} />
 
       {drawer === 'purchase' && (
         <PurchaseDrawer id={id} supplier={supplier} busy={busy} setBusy={setBusy}
@@ -357,5 +365,182 @@ function PaymentDrawer({ id, busy, setBusy, onClose, onDone, setError }) {
         {allocated > total && <Notice kind="error">Allocations exceed the payment amount.</Notice>}
       </form>
     </Drawer>
+  );
+}
+
+
+// ── Purchase invoice with line items (§20/§21) — "fuel must be an invoice" ──
+const ITEM_TYPES = [
+  { value: 'FUEL', label: 'Fuel' },
+  { value: 'TIRE', label: 'Tires' },
+  { value: 'PARTS', label: 'Parts' },
+  { value: 'SERVICE', label: 'Service' },
+  { value: 'OTHER', label: 'Other' },
+];
+const emptyItem = () => ({ key: Math.random().toString(36).slice(2), item_type: 'FUEL', fuel_type_id: '', tank_id: '', description: '', quantity: '', unit_price: '' });
+
+function InvoiceDrawer({ id, busy, setBusy, onClose, onDone, setError }) {
+  const [invoiceNo, setInvoiceNo] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
+  const [dueDate, setDueDate] = useState('');
+  const [notes, setNotes] = useState('');
+  const [items, setItems] = useState([emptyItem()]);
+  const [fuelTypes, setFuelTypes] = useState([]);
+  const [tanks, setTanks] = useState([]);
+
+  useEffect(() => {
+    api('/api/fuel-types').then((r) => setFuelTypes(r.fuel_types || [])).catch(() => {});
+    api('/api/tanks').then((r) => setTanks(r.tanks || [])).catch(() => {});
+  }, []);
+
+  const setItem = (key, patch) => setItems((list) => list.map((it) => (it.key === key ? { ...it, ...patch } : it)));
+  const total = items.reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
+  const valid = items.some((it) => Number(it.quantity) > 0 && (it.item_type !== 'FUEL' || it.fuel_type_id));
+
+  async function submit(e) {
+    e.preventDefault(); setBusy(true); setError('');
+    try {
+      const payload = {
+        invoice_no: invoiceNo || undefined,
+        invoice_date: invoiceDate || undefined,
+        due_date: dueDate || undefined,
+        notes: notes || undefined,
+        items: items
+          .filter((it) => Number(it.quantity) > 0)
+          .map((it) => ({
+            item_type: it.item_type,
+            fuel_type_id: it.item_type === 'FUEL' ? it.fuel_type_id : undefined,
+            tank_id: it.item_type === 'FUEL' && it.tank_id ? it.tank_id : undefined,
+            description: it.description || undefined,
+            quantity: Number(it.quantity),
+            unit_price: Number(it.unit_price) || 0,
+          })),
+      };
+      const r = await api(`/api/suppliers/${id}/invoices`, { method: 'POST', body: payload });
+      onDone(`Invoice ${r.invoice.invoice_no} posted — ${fmtKES(r.invoice.total)} debited to the ledger.`);
+    } catch (e2) { setError(e2.message); } finally { setBusy(false); }
+  }
+
+  return (
+    <Drawer open onClose={onClose} title="Receive invoice" width={620}
+      subtitle="One invoice, line items, one payable entry — fuel items can receive into a tank"
+      footer={<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+        <span className="muted" style={{ marginRight: 'auto' }}>Total <b style={{ color: 'var(--text)' }}>{fmtKES(total)}</b></span>
+        <button className="btn secondary" onClick={onClose}>Cancel</button>
+        <button className="btn" disabled={busy || !valid} onClick={submit}>{busy ? 'Posting…' : 'Post invoice'}</button>
+      </div>}>
+      <form onSubmit={submit}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+          <Field label="Supplier invoice no."><input value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="auto" /></Field>
+          <Field label="Invoice date"><input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} /></Field>
+          <Field label="Due date"><input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>
+        </div>
+
+        <h4 style={{ margin: '12px 0 6px', fontSize: 13 }}>Line items</h4>
+        {items.map((it, idx) => (
+          <div key={it.key} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 10, marginBottom: 8, background: 'var(--panel-2)' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+              <b className="muted" style={{ fontSize: 12 }}>#{idx + 1}</b>
+              <div style={{ width: 150 }}>
+                <SearchableSelect value={it.item_type} onChange={(v) => setItem(it.key, { item_type: v })} options={ITEM_TYPES} placeholder="Type" />
+              </div>
+              {it.item_type === 'FUEL' && (
+                <>
+                  <div style={{ flex: 1, minWidth: 140 }}>
+                    <SearchableSelect value={it.fuel_type_id} onChange={(v) => setItem(it.key, { fuel_type_id: v })} options={fuelTypes.map((f) => ({ value: f.id, label: f.name }))} placeholder="Fuel type *" />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 140 }}>
+                    <SearchableSelect value={it.tank_id} onChange={(v) => setItem(it.key, { tank_id: v })} options={tanks.map((t) => ({ value: t.id, label: `${t.code || t.name || 'Tank'}` }))} placeholder="Receive into tank (optional)" />
+                  </div>
+                </>
+              )}
+              {items.length > 1 && (
+                <button type="button" className="iconbtn" title="Remove item" onClick={() => setItems((l) => l.filter((x) => x.key !== it.key))}>🗑</button>
+              )}
+            </div>
+            {it.item_type !== 'FUEL' && (
+              <input placeholder="Description" value={it.description} onChange={(e) => setItem(it.key, { description: e.target.value })} style={{ width: '100%', marginBottom: 6 }} />
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+              <Field label="Quantity"><input type="number" min="0" step="0.001" value={it.quantity} onChange={(e) => setItem(it.key, { quantity: e.target.value })} placeholder={it.item_type === 'FUEL' ? 'litres' : 'qty'} /></Field>
+              <Field label="Unit price"><input type="number" min="0" step="0.01" value={it.unit_price} onChange={(e) => setItem(it.key, { unit_price: e.target.value })} /></Field>
+              <Field label="Amount"><input disabled value={fmtKES((Number(it.quantity) || 0) * (Number(it.unit_price) || 0))} /></Field>
+            </div>
+          </div>
+        ))}
+        <button type="button" className="btn secondary sm" onClick={() => setItems((l) => [...l, emptyItem()])}>+ Add item</button>
+        <Field label="Notes"><input value={notes} onChange={(e) => setNotes(e.target.value)} style={{ marginTop: 8 }} /></Field>
+      </form>
+    </Drawer>
+  );
+}
+
+// Invoices list for this supplier (click a row for the full invoice).
+function InvoicesCard({ id, refreshKey, onOpenError }) {
+  const [rows, setRows] = useState(null);
+  const [open, setOpen] = useState(null);
+  useEffect(() => {
+    api(`/api/suppliers/${id}/invoices`).then((r) => setRows(r.invoices || [])).catch(() => setRows([]));
+  }, [id, refreshKey]);
+
+  async function openInvoice(inv) {
+    try { setOpen(await api(`/api/suppliers/${id}/invoices/${inv.id}`)); }
+    catch (e) { onOpenError(e.message); }
+  }
+  function printInvoice() {
+    const { invoice, items } = open;
+    const rowsHtml = items.map((x) => `<tr><td>${x.item_type}</td><td>${x.description || x.fuel_type_name || ''}</td><td style="text-align:right">${Number(x.quantity).toLocaleString()}</td><td style="text-align:right">${Number(x.unit_price).toFixed(2)}</td><td style="text-align:right">${Number(x.amount).toFixed(2)}</td></tr>`).join('');
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(`<html><head><title>Invoice ${invoice.invoice_no}</title><style>body{font:12.5px/1.5 -apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:28px;color:#111}h2{margin:0 0 2px}table{width:100%;border-collapse:collapse;margin-top:14px}th{background:#1f3a5f;color:#fff;text-align:left;padding:6px}td{border-bottom:1px solid #ddd;padding:6px}tfoot td{font-weight:800;border-top:2px solid #1f3a5f}.m{color:#555;margin:2px 0 0}</style></head><body>
+      <h2>${invoice.supplier_name}</h2><p class="m">Supplier invoice ${invoice.invoice_no} · ${invoice.invoice_date}${invoice.due_date ? ` · due ${invoice.due_date}` : ''}</p>
+      <table><thead><tr><th>Type</th><th>Description</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit price</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rowsHtml}</tbody>
+      <tfoot><tr><td colspan="4" style="text-align:right">Total</td><td style="text-align:right">${Number(invoice.total).toFixed(2)}</td></tr></tfoot></table>
+      <p class="m">Posted ${invoice.created_by_name ? 'by ' + invoice.created_by_name + ' · ' : ''}${new Date(invoice.created_at).toLocaleString()}</p>
+      <script>window.print()</script></body></html>`);
+    w.document.close();
+  }
+
+  if (!rows) return null;
+  if (!rows.length) return null;
+  return (
+    <>
+      <Card title="Purchase invoices" subtitle="Received supplier invoices — each posted to the ledger as one payable entry">
+        <div style={{ display: 'grid', gap: 8 }}>
+          {rows.slice(0, 8).map((inv) => (
+            <button key={inv.id} className="mini-row" style={{ cursor: 'pointer', textAlign: 'left' }} onClick={() => openInvoice(inv)}>
+              <div style={{ flex: 1 }}>
+                <b className="mono" style={{ fontSize: 12.5 }}>{inv.invoice_no}</b>
+                <div className="muted" style={{ fontSize: 12 }}>{inv.invoice_date} · {inv.item_count} item(s)</div>
+              </div>
+              <b>{fmtKES(inv.total)}</b>
+            </button>
+          ))}
+        </div>
+      </Card>
+      <Drawer open={!!open} onClose={() => setOpen(null)} title={open ? `Invoice ${open.invoice.invoice_no}` : ''} subtitle={open ? `${open.invoice.supplier_name} · ${open.invoice.invoice_date}` : ''} width={520}>
+        {open && (
+          <>
+            <div style={{ display: 'grid', gap: 6, fontSize: 13 }}>
+              {open.items.map((x) => (
+                <div key={x.id} style={{ display: 'flex', gap: 10, borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
+                  <span className="muted" style={{ width: 60 }}>{x.item_type}</span>
+                  <span style={{ flex: 1 }}>{x.description || x.fuel_type_name || '—'}</span>
+                  <span className="muted">{Number(x.quantity).toLocaleString()} × {Number(x.unit_price).toFixed(2)}</span>
+                  <b>{fmtKES(x.amount)}</b>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 6 }}>
+                <b>Total</b><b>{fmtKES(open.invoice.total)}</b>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button className="btn secondary" onClick={printInvoice}>🖨 Print</button>
+              <Link href={`/suppliers/${id}`} className="muted" style={{ alignSelf: 'center', fontSize: 12.5 }}>View in ledger →</Link>
+            </div>
+          </>
+        )}
+      </Drawer>
+    </>
   );
 }

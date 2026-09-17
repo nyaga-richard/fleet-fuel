@@ -88,6 +88,7 @@ export const api = {
   requests: (status) => request(`/api/requests${status ? `?status=${encodeURIComponent(status)}` : ''}`),
   decideRequest: (id, decision, comments) =>
     request(`/api/requests/${id}/${decision}`, { method: 'POST', body: comments ? { comments } : {} }),
+  // Backend routes are /approve and /reject — decision arrives as APPROVED/REJECTED.
   decideApproval: (id, decision, reason) =>
-    request(`/api/approvals/${id}/${decision.toLowerCase()}`, { method: 'POST', body: reason ? { reason } : {} }),
+    request(`/api/approvals/${id}/${String(decision).toUpperCase() === 'REJECTED' ? 'reject' : 'approve'}`, { method: 'POST', body: reason ? { reason } : {} }),
 };

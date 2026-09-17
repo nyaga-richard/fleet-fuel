@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Area, AreaChart, CartesianGrid, XAxis, YAxis,
+  Area, AreaChart, CartesianGrid, XAxis, YAxis, Tooltip, Legend,
 } from 'recharts';
 import { Card, SearchableSelect, Notice } from '@/components/ui';
 import { api } from '@/lib/api';

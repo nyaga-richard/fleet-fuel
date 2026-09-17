@@ -7,6 +7,7 @@ const SEQ = {
   supplier_payment: { seq: 'supplier_payment_no_seq', prefix: 'PAY' },
   supplier_adjustment: { seq: 'supplier_adjustment_no_seq', prefix: 'ADJ' },
   supplier_purchase: { seq: 'supplier_purchase_no_seq', prefix: 'SPR' },
+  supplier_invoice: { seq: 'supplier_invoice_no_seq', prefix: 'SINV' },
 };
 
 export async function nextDocNumber(client, kind) {
