@@ -23,6 +23,15 @@ export async function apiBlob(path) {
 }
 
 export function downloadBlob(blob, filename) {
+  // Guard: apiBlob() returns { blob, filename } — accept both shapes but never
+  // hand a non-Blob to URL.createObjectURL (it throws "Overload resolution
+  // failed" with no hint about the cause).
+  if (blob && typeof blob === 'object' && typeof blob.blob !== 'function' && blob.blob instanceof Blob) {
+    blob = blob.blob;
+  }
+  if (!(blob instanceof Blob)) {
+    throw new Error('Download failed — the server response was not a file.');
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename;

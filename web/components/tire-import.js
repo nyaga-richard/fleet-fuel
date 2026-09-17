@@ -118,7 +118,7 @@ export default function TireImport({ onDone }) {
         <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" hidden onChange={(e) => handleFile(e.target.files?.[0])} />
         <div style={{ marginTop: 12 }}>
           <button className="btn secondary sm" onClick={async () => {
-            try { const b = await apiBlob('/api/tire-imports/template'); downloadBlob(b, 'tire-import-template.csv'); }
+            try { const { blob, filename } = await apiBlob('/api/tire-imports/template'); downloadBlob(blob, filename); }
             catch (e) { setError(e.message); }
           }}>⬇ Download template</button>
         </div>
