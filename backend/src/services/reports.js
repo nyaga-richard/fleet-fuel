@@ -128,6 +128,7 @@ export async function fuelLedger(q, { page = 1, pageSize = 50 } = {}) {
               t.name AS tank_name,
               u.name AS performed_by_name,
               ftx.txn_no, ftx.status AS txn_status, ftx.unit_price, ftx.odometer, ftx.id AS txn_id,
+              ftx.lpo_no,
               ftxr.request_no,
               p.receipt_no, p.supplier, p.unit_price AS purchase_unit_price, p.invoice_no,
               v.plate,
@@ -193,6 +194,7 @@ export async function fuelLedger(q, { page = 1, pageSize = 50 } = {}) {
       id: r.id,
       date: r.created_at,
       reference: r.txn_no || r.receipt_no || `LT-${String(r.id).slice(0, 8).toUpperCase()}`,
+      lpo: r.lpo_no || null,
       particulars: r.description || (r.txn_no ? `Fuel issue against ${r.request_no || r.txn_no}` : r.receipt_no ? `Bulk receipt — ${r.supplier || 'supplier'}` : type),
       fuel_type: r.fuel_type_name,
       entry_type: type,
@@ -218,25 +220,21 @@ export async function fuelLedger(q, { page = 1, pageSize = 50 } = {}) {
 
   return {
     title: 'Fuel Ledger',
-    orientation: 'landscape',
+    // Portrait print layout — the column set the operator asked for:
+    // Date, LPO, Particulars, Vehicle, Qty In, Qty Out, Running, Amount, User.
+    // (Row objects keep the extra fields; the web screen uses its own columns.)
+    orientation: 'portrait',
     meta: { filters: filtersText(q, { fuel_type_id: 'Fuel Type', tank_id: 'Tank', entry_type: 'Transaction Type', vehicle_id: 'Vehicle', q: 'Search' }), org: profile },
     columns: [
-      { key: 'date', label: 'Date', type: 'datetime', width: 19 },
-      { key: 'reference', label: 'Reference', width: 14 },
-      { key: 'particulars', label: 'Particulars', width: 34 },
-      { key: 'fuel_type', label: 'Fuel Type', width: 12 },
-      { key: 'entry_type', label: 'Transaction Type', width: 18 },
-      { key: 'qty_in', label: 'Qty In (L)', type: 'number', width: 11 },
-      { key: 'qty_out', label: 'Qty Out (L)', type: 'number', width: 11 },
-      { key: 'running_balance', label: 'Running Balance (L)', type: 'number', width: 17 },
-      { key: 'unit_cost', label: `Unit Cost (${profile.currency})`, type: 'money', width: 13 },
+      { key: 'date', label: 'Date', type: 'datetime', width: 16 },
+      { key: 'lpo', label: 'LPO No', width: 14 },
+      { key: 'particulars', label: 'Particulars', width: 30 },
+      { key: 'vehicle', label: 'Vehicle', width: 11 },
+      { key: 'qty_in', label: 'Qty In (L)', type: 'number', width: 10 },
+      { key: 'qty_out', label: 'Qty Out (L)', type: 'number', width: 10 },
+      { key: 'running_balance', label: 'Running Balance (L)', type: 'number', width: 13 },
       { key: 'amount', label: `Amount (${profile.currency})`, type: 'money', width: 13 },
-      { key: 'vehicle', label: 'Vehicle', width: 12 },
-      { key: 'pump', label: 'Pump', width: 12 },
-      { key: 'tank', label: 'Tank', width: 14 },
-      { key: 'user', label: 'User', width: 14 },
-      { key: 'status', label: 'Status', width: 10 },
-      { key: 'excess_status', label: 'Excess Approval', width: 13 },
+      { key: 'user', label: 'User', width: 12 },
     ],
     rows,
     summary: [

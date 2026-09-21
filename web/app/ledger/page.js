@@ -124,7 +124,7 @@ function Ledger() {
                 <table className="tbl sticky">
                   <thead>
                     <tr>
-                      <th>Date</th><th>Reference</th><th>Particulars</th><th>Fuel</th><th>Type</th>
+                      <th>Date</th><th>Reference</th><th>LPO</th><th>Particulars</th><th>Fuel</th><th>Type</th>
                       <th className="num">Qty In</th><th className="num">Qty Out</th><th className="num">Running</th>
                       <th className="num">Amount</th><th>Vehicle</th><th>Tank</th><th>User</th><th>Status</th>
                     </tr>
