@@ -31,7 +31,7 @@ function DirectEntry() {
   const [tanks, setTanks] = useState([]);
   const [role, setRole] = useState(null);
   const [form, setForm] = useState({
-    date: todayISO(), vehicle_id: '', fuel_type_id: '', tank_id: '',
+    date: todayISO(), vehicle_id: '', fuel_type_id: '', tank_id: '', lpo_no: '',
     quantity: '', odometer: '', unit_price: '', destination: '',
   });
   const [costPrice, setCostPrice] = useState(null);
@@ -101,6 +101,7 @@ function DirectEntry() {
           odometer: form.odometer === '' ? undefined : Number(form.odometer),
           destination: form.destination || undefined,
           transaction_date: form.date ? `${form.date}T${nowHM()}:00` : undefined,
+          lpo_no: form.lpo_no?.trim() || undefined,
           client_uuid: uuid(),
         },
       });
@@ -120,7 +121,7 @@ function DirectEntry() {
   const vehicleName = (vehicles.find((v) => v.id === form.vehicle_id) || {}).plate || '—';
   const fuelName = (fuels.find((f) => f.id === form.fuel_type_id) || {}).name || '—';
   const tankName = (tanks.find((t) => t.id === form.tank_id) || {}).name || '—';
-  const reset = () => setForm({ date: todayISO(), vehicle_id: '', fuel_type_id: '', tank_id: '', quantity: '', odometer: '', unit_price: '', destination: '' });
+  const reset = () => setForm({ date: todayISO(), vehicle_id: '', fuel_type_id: '', tank_id: '', quantity: '', odometer: '', unit_price: '', destination: '', lpo_no: '' });
 
   if (role === 'attendant') {
     return (
@@ -180,6 +181,7 @@ function DirectEntry() {
               <input type="number" inputMode="decimal" step="0.01" min="0" value={form.unit_price} onChange={set('unit_price')} placeholder={costPrice != null ? String(costPrice) : 'required'} />
             </Field>
             <Field label="Destination — optional"><input value={form.destination} onChange={set('destination')} placeholder="e.g. Molo" /></Field>
+            <Field label="LPO No — optional" hint="Customer Local Purchase Order reference"><input value={form.lpo_no} onChange={set('lpo_no')} placeholder="e.g. LPO/2026/00421" /></Field>
           </div>
           <div className="muted" style={{ fontSize: 12 }}>
             Posting reduces station stock immediately, writes both ledgers and creates an audit event. No approval is created; corrections use the normal reversal flow.

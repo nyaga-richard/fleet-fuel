@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { asyncH, notFound, bad } from '../middleware/errors.js';
-import { needUuid, needNum, needStr, optUuid, isUuid } from '../middleware/validate.js';
+import { needUuid, needNum, needStr, optUuid, optStr, isUuid } from '../middleware/validate.js';
 import { issueFuel, reverseFuelTransaction } from '../services/ops.js';
 import { tx } from '../db/pool.js';
 
@@ -55,6 +55,7 @@ router.post('/issue', requireRole('attendant', 'manager', 'admin'), asyncH(async
     unit_price: needNum(req.body, 'unit_price', { min: 0, optional: true }),
     odometer: needNum(req.body, 'odometer', { min: 0, optional: true }),
     pump_reading: needNum(req.body, 'pump_reading', { min: 0, optional: true }),
+    lpo_no: optStr(req.body, 'lpo_no', { max: 60 }),
     client_uuid: optUuid(req.body, 'client_uuid'),
   };
   if (!payload.request_id && !payload.request_no) throw bad('request_id or request_no is required');

@@ -283,6 +283,11 @@ router.post('/:id/invoices', requirePerm('suppliers:update'), asyncH(async (req,
           ref_id: inv[0].id,
           description: `Invoice ${docNo} — ${p.description} from ${sup.name}`,
           performed_by: req.user.sub,
+          // Fuel Ledger receipt row carries the invoice date the user picked,
+          // not the posting instant (same rule as direct fuel entries).
+          at: invoiceDate
+            ? (String(invoiceDate).includes('T') ? String(invoiceDate) : `${invoiceDate}T12:00:00`)
+            : null,
         });
         // Price truth for cost-price lookups (same table receipts use).
         await client.query(

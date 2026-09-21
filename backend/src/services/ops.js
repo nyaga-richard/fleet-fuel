@@ -169,12 +169,12 @@ export async function issueFuel(client, { payload, userId }) {
   const { rows: inserted } = await client.query(
     `INSERT INTO fuel_transactions
        (txn_no, request_id, authorization_id, vehicle_id, fuel_type_id, tank_id, pump_id,
-        quantity, unit_price, operator_id, odometer, status, client_uuid, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'completed',$12, COALESCE($13::timestamptz, now()))
+        quantity, unit_price, operator_id, odometer, status, client_uuid, lpo_no, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'completed',$12,$13, COALESCE($14::timestamptz, now()))
      RETURNING *`,
     [txnNo, request.id, authz[0]?.id ?? null, request.vehicle_id, fuelTypeId, tankId, pumpId,
       qty, payload.unit_price ?? null, userId, payload.odometer ?? request.odometer ?? null,
-      clientUuid, payload.created_at ?? null],
+      clientUuid, payload.lpo_no ?? null, payload.created_at ?? null],
   );
 
   // THE LEDGER: immutable negative issue entry with running balance.
@@ -307,14 +307,14 @@ export async function directFuelEntry(client, { payload, userId }) {
   const { rows: inserted } = await client.query(
     `INSERT INTO fuel_transactions
        (txn_no, request_id, authorization_id, vehicle_id, fuel_type_id, tank_id, pump_id,
-        quantity, unit_price, unit_cost, operator_id, odometer, status, client_uuid,
+        quantity, unit_price, unit_cost, operator_id, odometer, status, client_uuid, lpo_no,
         source, destination, purpose, remarks, pump_start, pump_end, created_at)
-     VALUES ($1,NULL,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,'DIRECT_ENTRY',$12,$13,$14,$15,$16,
-             COALESCE($17::timestamptz, now()))
+     VALUES ($1,NULL,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,$12,'DIRECT_ENTRY',$13,$14,$15,$16,$17,
+             COALESCE($18::timestamptz, now()))
      RETURNING *`,
     [txnNo, payload.vehicle_id, payload.fuel_type_id, tankId, pumpId,
       qty, appliedPrice, costPrice, userId, payload.odometer ?? null,
-      clientUuid, payload.destination ?? null, payload.purpose ?? null, payload.remarks ?? null,
+      clientUuid, payload.lpo_no ?? null, payload.destination ?? null, payload.purpose ?? null, payload.remarks ?? null,
       pumpStart, pumpEnd, payload.transaction_date ?? null]);
 
   // THE LEDGER — same immutable negative issue entry as workflow issues.
@@ -327,6 +327,7 @@ export async function directFuelEntry(client, { payload, userId }) {
     ref_id: inserted[0].id,
     description: `Direct entry ${qty} L — ${veh[0].plate}${payload.destination ? ` to ${payload.destination}` : ''}`,
     performed_by: userId,
+    at: payload.transaction_date ?? null, // ledger row dated as entered, not today
   });
 
   // Meter truth for reconciliation: record the end reading like a handover.

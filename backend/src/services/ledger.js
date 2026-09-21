@@ -35,13 +35,16 @@ export async function postLedgerEntry(client, entry) {
   // Serialize balance updates per fuel type.
   await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`fleetfuel:ledger:${entry.fuel_type_id}`]);
 
+  // `at` — optional business timestamp (ISO string): when the user picks a date
+  // during entry (direct fuel entry, invoice date), the LEDGER row must carry
+  // that date, not the posting instant. Omitted → posted now().
   const { rows } = await client.query(
     `INSERT INTO inventory_transactions
        (entry_type, fuel_type_id, tank_id, quantity, balance_after,
-        ref_table, ref_id, description, performed_by, client_uuid)
+        ref_table, ref_id, description, performed_by, client_uuid, created_at)
      VALUES ($1, $2, $3, $4,
              (SELECT COALESCE(SUM(quantity), 0) FROM inventory_transactions WHERE fuel_type_id = $2) + $4,
-             $5, $6, $7, $8, $9)
+             $5, $6, $7, $8, $9, COALESCE($10::timestamptz, now()))
      RETURNING id, entry_type, fuel_type_id, tank_id, quantity, balance_after,
                ref_table, ref_id, description, created_at`,
     [
@@ -54,6 +57,7 @@ export async function postLedgerEntry(client, entry) {
       entry.description ?? null,
       entry.performed_by ?? null,
       entry.client_uuid ?? null,
+      entry.at ?? null,
     ],
   );
   return rows[0];

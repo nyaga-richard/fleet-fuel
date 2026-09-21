@@ -70,6 +70,7 @@ router.post('/direct', requirePerm('fuel_entries:create'), asyncH(async (req, re
     destination: optStr(req.body, 'destination', { max: 200 }),
     purpose: optStr(req.body, 'purpose', { max: 200 }),
     remarks: optStr(req.body, 'remarks', { max: 500 }),
+    lpo_no: optStr(req.body, 'lpo_no', { max: 60 }),
     transaction_date: optStr(req.body, 'transaction_date', { max: 40 }),
     client_uuid: optUuid(req.body, 'client_uuid'),
   };

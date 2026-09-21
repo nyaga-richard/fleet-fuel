@@ -435,7 +435,7 @@ export async function fuelTransactions(q) {
   const profile = await orgProfile();
   const { rows } = await pool.query(
     `SELECT t.txn_no, t.created_at, v.plate, ft.name AS fuel_type, p.name AS pump, t2.name AS tank,
-            t.source, t.destination,
+            t.source, t.destination, t.lpo_no,
             t.quantity::float AS quantity, t.unit_price::float AS unit_price,
             (t.quantity * COALESCE(t.unit_price, 0))::float AS amount,
             t.odometer, u.name AS operator, r.request_no, t.status
@@ -456,6 +456,7 @@ export async function fuelTransactions(q) {
       { key: 'created_at', label: 'Date', type: 'datetime', width: 19 },
       { key: 'txn_no', label: 'Transaction', width: 15 },
       { key: 'request_no', label: 'Request', width: 14 },
+      { key: 'lpo_no', label: 'LPO No', width: 14 },
       { key: 'plate', label: 'Vehicle', width: 12 },
       { key: 'fuel_type', label: 'Fuel Type', width: 12 },
       { key: 'pump', label: 'Pump', width: 12 },
@@ -531,6 +532,7 @@ export async function fuelRequests(q) {
     columns: [
       { key: 'created_at', label: 'Date', type: 'datetime', width: 19 },
       { key: 'request_no', label: 'Request', width: 14 },
+      { key: 'lpo_no', label: 'LPO No', width: 14 },
       { key: 'plate', label: 'Vehicle', width: 12 },
       { key: 'fuel_type', label: 'Fuel', width: 12 },
       { key: 'quantity', label: 'Quantity (L)', type: 'number', width: 12 },
@@ -563,6 +565,7 @@ export async function fuelAuthorizations(q) {
     columns: [
       { key: 'decided_at', label: 'Decided', type: 'datetime', width: 19 },
       { key: 'request_no', label: 'Request', width: 14 },
+      { key: 'lpo_no', label: 'LPO No', width: 14 },
       { key: 'decision', label: 'Decision', width: 11 },
       { key: 'decided_by', label: 'Decided By', width: 16 },
       { key: 'authorized_qty', label: 'Authorized (L)', type: 'number', width: 13 },
@@ -593,6 +596,7 @@ export async function excessFuel(q) {
       { key: 'created_at', label: 'Date', type: 'datetime', width: 19 },
       { key: 'txn_no', label: 'Transaction', width: 15 },
       { key: 'request_no', label: 'Request', width: 14 },
+      { key: 'lpo_no', label: 'LPO No', width: 14 },
       { key: 'authorized', label: 'Authorized (L)', type: 'number', width: 13 },
       { key: 'actual', label: 'Actual (L)', type: 'number', width: 11 },
       { key: 'excess', label: 'Excess (L)', type: 'number', width: 10 },

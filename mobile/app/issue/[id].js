@@ -26,6 +26,7 @@ export default function FuelingFlow() {
   const [pumpId, setPumpId] = useState(null);
   const [tankStock, setTankStock] = useState([]);
   const [odometer, setOdometer] = useState('');
+  const [lpoNo, setLpoNo] = useState('');
   const [startMeter, setStartMeter] = useState('');
   const [quantity, setQuantity] = useState('');
   const [endMeter, setEndMeter] = useState('');
@@ -84,6 +85,7 @@ export default function FuelingFlow() {
         quantity: qty,
         pump_reading: endMeter !== '' ? Number(endMeter) : (startMeter !== '' ? Number(startMeter) + qty : null),
         odometer: odometer !== '' ? Number(odometer) : null,
+        lpo_no: lpoNo.trim() || null,
         created_at: new Date().toISOString(),
       });
       setDone({
@@ -212,7 +214,19 @@ export default function FuelingFlow() {
         </Field>
       </Step>
 
-      <Step n={5} title="Fuel quantity (L)">
+      <Step n={5} title="LPO number">
+        <Field hint="Optional — customer Local Purchase Order reference">
+          <Input
+            value={lpoNo}
+            onChangeText={setLpoNo}
+            placeholder="e.g. LPO/2026/00421"
+            autoCapitalize="characters"
+            returnKeyType="next"
+          />
+        </Field>
+      </Step>
+
+      <Step n={6} title="Fuel quantity (L)">
         <Field hint={`Authorized: ${fmtQty(authorized)}`} error={qtyInvalid ? 'Enter a valid quantity' : excess ? `Excess fuel requires manager approval. Authorized: ${fmtQty(authorized)}.` : null}>
           <Input
             keyboardType="decimal-pad"
@@ -245,7 +259,7 @@ export default function FuelingFlow() {
         )}
       </Step>
 
-      <Step n={6} title="Pump end meter">
+      <Step n={7} title="Pump end meter">
         <Field hint={suggestedEnd ? `Suggested from start meter: ${suggestedEnd}` : 'Optional — closing scale reading'}>
           <Input
             keyboardType="decimal-pad"
@@ -257,12 +271,13 @@ export default function FuelingFlow() {
         </Field>
       </Step>
 
-      <Step n={7} title="Review">
+      <Step n={8} title="Review">
         <Card style={{ marginBottom: 0 }}>
           <KV rows={[
             ['Vehicle', req.plate || vehicle?.plate || '—'],
             ['Pump', (pumps.find((p) => p.id === pumpId) || {}).name || '—'],
             ['Odometer', odometer ? `${Number(odometer).toLocaleString()} km` : '—'],
+        ...(lpoNo ? [['LPO No', lpoNo]] : []),
             ['Start meter', startMeter || '—'],
             ['End meter', endMeter || (suggestedEnd ? `${suggestedEnd} (calc)` : '—')],
             ['Authorized', fmtQty(authorized)],
