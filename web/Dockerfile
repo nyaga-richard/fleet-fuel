@@ -12,6 +12,10 @@ COPY . .
 # Server-side backend URL for the container (service name in compose).
 ARG BACKEND_URL=http://backend:4000
 ENV BACKEND_URL=$BACKEND_URL
+
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 RUN npm run build
 
 # ---- Runtime ----
