@@ -20,9 +20,11 @@ WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
-# The standalone tree nests the app under its directory name (web/):
-#   standalone/node_modules + standalone/web/server.js
+# NOTE: the Docker build context is web/ only, so the build stage has no
+# parent workspace package.json and Next emits a FLAT standalone tree
+# (server.js at the standalone root). Do NOT "fix" the paths to web/server.js —
+# that only exists when building from the repo workspace root.
 COPY --from=build /app/.next/standalone ./
-COPY --from=build /app/.next/static ./web/.next/static
+COPY --from=build /app/.next/static ./.next/static
 EXPOSE 3000
-CMD ["node", "web/server.js"]
+CMD ["node", "server.js"]
