@@ -17,6 +17,20 @@ import inventoryRoutes from './routes/inventory.js';
 import ledgerRoutes from './routes/ledger.js';
 import syncRoutes from './routes/sync.js';
 import systemRoutes from './routes/system.js';
+import reportsRoutes from './routes/reports.js';
+import notificationsRoutes from './routes/notifications.js';
+import approvalsRoutes from './routes/approvals.js';
+import devicesRoutes from './routes/devices.js';
+import fuelEntriesRoutes from './routes/fuel-entries.js';
+import externalFuelRoutes from './routes/external-fuel.js';
+import tiresRoutes from './routes/tires.js';
+import tripsRoutes from './routes/trips.js';
+import dashboardRoutes from './routes/dashboard.js';
+import wheelConfigsRoutes from './routes/wheel-configs.js';
+import suppliersRoutes from './routes/suppliers.js';
+import tireImportsRoutes from './routes/tire-imports.js';
+import meRoutes from './routes/me.js';
+import { flushPushes } from './services/push.js';
 
 export function createApp() {
   const app = express();
@@ -47,6 +61,10 @@ export function createApp() {
     next();
   });
 
+  // §40 — queued pushes flush once the response finishes: the transaction
+  // behind it has committed by then, so a rollback can never send a phantom push.
+  app.use((_req, res, next) => { res.on('finish', () => { flushPushes().catch(() => {}); }); next(); });
+
   app.use('/api/health', healthRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/users', usersRoutes);
@@ -60,6 +78,19 @@ export function createApp() {
   app.use('/api/ledger', ledgerRoutes);
   app.use('/api/sync', syncRoutes);
   app.use('/api/system', systemRoutes);
+  app.use('/api/reports', reportsRoutes);
+  app.use('/api/notifications', notificationsRoutes);
+  app.use('/api/approvals', approvalsRoutes);
+app.use('/api/devices', devicesRoutes);
+app.use('/api/fuel-entries', fuelEntriesRoutes);
+app.use('/api/external-fuel', externalFuelRoutes);
+app.use('/api/tires', tiresRoutes);
+app.use('/api/trips', tripsRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/wheel-configs', wheelConfigsRoutes);
+app.use('/api/suppliers', suppliersRoutes);
+app.use('/api/tire-imports', tireImportsRoutes);
+app.use('/api/me', meRoutes);
 
   app.use('/api', notFoundHandler);
   app.get('/', (_req, res) => res.json({ service: 'fleet-fuel-api', docs: '/api/health', version: config.version }));

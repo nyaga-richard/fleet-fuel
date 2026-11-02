@@ -3,6 +3,7 @@ import { View, Text, FlatList, TouchableOpacity } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuth } from '../../src/auth';
 import {
+  Icon,
   Screen, ScreenHeader, SectionHeader, StatusBadge, Btn, Field, Input, Chip,
   SearchBar, FilterButton, EmptyState, OfflineBanner, Sheet, RequestCard,
   SelectField, useDebounced, useTabBarPad,
@@ -11,7 +12,7 @@ import {
   cachedRequests, cachedVehicles, cachedFuelTypes, enqueue, outboxCount, kvGet,
 } from '../../src/db';
 import { fullSync } from '../../src/sync';
-import { C, spacing as SP } from '../../theme';
+import { C, spacing as SP , ICON } from '../../theme';
 import { fmtDateTime } from '../../src/fmt';
 
 const STATUS_FILTERS = ['all', 'pending', 'approved', 'issued', 'rejected', 'cancelled'];
@@ -69,7 +70,10 @@ export default function RequestsScreen() {
             accessibilityLabel="New fuel request"
             style={{ backgroundColor: C.accent, borderRadius: 20, paddingHorizontal: 14, minHeight: 40, justifyContent: 'center' }}
           >
-            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>＋ New</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Icon name="plus" size={ICON.sm} color="#ffffff" />
+              <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>New</Text>
+            </View>
           </TouchableOpacity>
         )}
       />
@@ -102,14 +106,14 @@ export default function RequestsScreen() {
         renderItem={({ item }) => <RequestCard request={item} onPress={() => router.push(`/request/${item.id}`)} />}
         ListEmptyComponent={(
           <EmptyState
-            icon="🔍"
+            icon="text-search"
             title={dq || filterCount ? 'No matching requests' : 'No requests yet'}
             message={dq || filterCount
               ? 'Try another registration, request number, or clear the filters.'
               : 'Pull down on Home to sync, or create the first request.'}
             action={(dq || filterCount)
               ? <Btn label="Clear search & filters" variant="secondary" onPress={() => { setQ(''); setFilters(DEFAULT_FILTERS); }} />
-              : <Btn label="＋ New fuel request" onPress={() => setCreateSheet(true)} />}
+              : <Btn label="New fuel request" icon="plus" onPress={() => setCreateSheet(true)} />}
           />
         )}
         contentContainerStyle={{ paddingBottom: useTabBarPad() }}

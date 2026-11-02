@@ -23,7 +23,7 @@ GLOBALS = {'require','module','exports','console','Promise','Math','Number','Str
 # Words that appear ONLY inside JSX prose sentences (never as code identifiers in
 # files where they're not already defined). If a file declares/imports the name,
 # it lands in `defined` from that — this list only masks prose-only occurrences.
-PROSE_ONLY = {'cause','automatically','received','change','CONFIGURED','request','first'}
+PROSE_ONLY = {'REJECTED','cause','automatically','received','change','CONFIGURED','request','first'}
 
 def strip_noncode(code):
     code = re.sub(r"(\w)'(\w)", r"\1’\2", code)              # You're → JSX-text apostrophe
@@ -86,6 +86,11 @@ def main():
         code = strip_noncode(open(f).read())
         defined = collect_defined(code)
         called = set(re.findall(r"(?<![\w.$])([A-Za-z_$][\w$]*)\s*\(", code))
+        # JSX component tags (<Icon, <Screen, …) are runtime identifier
+        # references bundlers cannot check — an undefined component must fail
+        # the audit here, not as a ReferenceError on device. Uppercase-only
+        # avoids matching `a < b` comparisons.
+        called |= set(re.findall(r"<([A-Z][A-Za-z0-9_]*)", code))
         missing = sorted(c for c in called if c not in defined)
         if missing:
             problems.append((os.path.relpath(f, ROOT), missing))

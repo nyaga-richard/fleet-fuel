@@ -2,11 +2,12 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
+  Icon,
   Screen, Card, SectionHeader, StatusBadge, Btn, KV, EmptyState,
 } from '../../src/components';
 import { cachedRequests, cachedVehicles, cachedFuelTypes } from '../../src/db';
 import { useAuth } from '../../src/auth';
-import { C, spacing as SP } from '../../theme';
+import { C, spacing as SP, ICON } from '../../theme';
 import { fmtQty, fmtDateTime } from '../../src/fmt';
 
 // Request Details (spec §15/§16) — grouped sections, the ONLY place from
@@ -36,7 +37,7 @@ export default function RequestDetails() {
       <Screen>
         <BackHeader onPress={() => router.back()} />
         <EmptyState
-          icon="🌫"
+          icon="text-search"
           title="Request not found on this device"
           message="It may not be synced yet — pull down on Home to refresh, then reopen."
           action={<Btn label="Back" variant="secondary" onPress={() => router.back()} />}
@@ -107,14 +108,14 @@ export default function RequestDetails() {
       {req.status === 'pending' && (
         <Card>
           <Text style={{ color: C.amber, fontSize: 13, fontWeight: '600' }}>
-            ⏳ Waiting for manager authorization. Fuel can be issued once it is approved.
+            Waiting for manager authorization. Fuel can be issued once it is approved.
           </Text>
         </Card>
       )}
       {req.status === 'issued' && (
         <Card>
           <Text style={{ color: C.accent2, fontSize: 13, fontWeight: '600' }}>
-            ✓ Fuel issued for this request — see the ledger on the web console or the Sync tab.
+            Fuel issued for this request — see the ledger on the web console or the Sync tab.
           </Text>
         </Card>
       )}
@@ -131,7 +132,7 @@ function BackHeader({ onPress, title }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 12 }}>
       <TouchableOpacity onPress={onPress} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-        <Text style={{ color: C.accent2, fontSize: 22 }}>←</Text>
+        <Icon name="arrow-left" size={ICON.xl} color={C.accent2} />
       </TouchableOpacity>
       {!!title && <Text style={{ color: C.text, fontSize: 17, fontWeight: '800', flexShrink: 1 }} numberOfLines={1}>{title}</Text>}
     </View>

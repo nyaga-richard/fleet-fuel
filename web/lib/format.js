@@ -77,4 +77,13 @@ export const STATUS_COLORS = {
   issue: '#f59e0b',
   adjustment: '#eab308',
   reversal: '#38bdf8',
+  // fleet expansion (§8/§20/§13) — statuses arrive UPPERCASE from the API
+  ACTIVE: '#22c55e', INACTIVE: '#9ca3af', MAINTENANCE: '#f59e0b', ACCIDENT: '#ef4444',
+  RETIRED: '#9ca3af', SOLD: '#a78bfa', DISPOSED: '#ef4444',
+  PLANNED: '#a78bfa', AUTHORIZED: '#22c55e', IN_PROGRESS: '#3b82f6', CANCELLED: '#9ca3af',
+  IN_STORE: '#22c55e', USED_STORE: '#60a5fa', ON_VEHICLE: '#2563eb',
+  AWAITING_RETREAD: '#f59e0b', AT_RETREAD_SUPPLIER: '#eab308',
+  FIT: '#22c55e', REMOVE: '#f59e0b', ROTATE: '#3b82f6',
+  UNPAID: '#ef4444', PARTPAID: '#f59e0b', PAID: '#22c55e',
+  CASH: '#60a5fa', CARD: '#a78bfa', ACCOUNT: '#f59e0b', OTHER: '#9ca3af',
 };

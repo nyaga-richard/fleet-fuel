@@ -188,8 +188,10 @@ function Adjustments({ canManage }) {
     e.preventDefault();
     setBusy(true); setError('');
     try {
-      await api('/api/inventory/adjustments', { method: 'POST', body: { ...form, quantity: Number(form.quantity) } });
-      setNotice('Adjustment posted to the fuel ledger (signed quantity, reason audited).');
+      const res = await api('/api/inventory/adjustments', { method: 'POST', body: { ...form, quantity: Number(form.quantity), client_uuid: crypto.randomUUID() } });
+      setNotice(res?.pending
+        ? 'Adjustment submitted for approval — stock changes only after a manager or administrator approves it (Approvals page).'
+        : 'Adjustment posted to the fuel ledger (signed quantity, reason audited).');
       setForm({ fuel_type_id: '', tank_id: '', quantity: '', reason: '' });
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }

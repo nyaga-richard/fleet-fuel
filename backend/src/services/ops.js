@@ -6,7 +6,10 @@
 // ============================================================================
 import { findByClientUuid, postLedgerEntry } from './ledger.js';
 import { audit } from './audit.js';
+import { notify, notifyRoles } from './notify.js';
+import { createApproval } from './approvals.js';
 import { nextDocNumber } from './numbering.js';
+import { recordOdometer } from './fleet.js';
 import { ApiError } from '../middleware/errors.js';
 
 const dupResult = (existing) => ({ status: 'duplicate', ref: { id: existing.id } });
@@ -46,6 +49,14 @@ export async function createFuelRequest(client, { payload, userId }) {
       userId, clientUuid, payload.created_at ?? null],
   );
   await audit(client, { userId, action: 'fuel_request.create', entity: 'fuel_requests', entityId: rows[0].id, details: { request_no: requestNo, quantity: qty } });
+  await notifyRoles(client, ['manager', 'admin'], {
+    type: 'fuel_request.submitted',
+    title: 'New fuel request submitted',
+    message: `${rows[0].request_no} — ${qty} L submitted for approval.`,
+    entityType: 'fuel_request', entityId: rows[0].id,
+    severity: 'INFO', dedupKey: `fuel_request.submitted:${rows[0].id}`,
+    metadata: { request_no: rows[0].request_no, quantity: qty },
+  }, { excludeUserId: userId });
   return { row: rows[0], duplicate: false };
 }
 
@@ -71,6 +82,27 @@ export async function decideFuelRequest(client, { requestId, decision, userId, c
     [requestId, decision],
   );
   await audit(client, { userId, action: `fuel_request.${decision}`, entity: 'fuel_requests', entityId: requestId, details: { request_no: request.request_no, comments } });
+  if (decision === 'approved') {
+    await notify(client, {
+      userId: request.requested_by,
+      type: 'fuel_request.approved',
+      title: `Fuel request ${request.request_no} approved`,
+      message: `Your fuel request ${request.request_no} was approved and is ready for fueling.`,
+      entityType: 'fuel_request', entityId: request.id,
+      severity: 'SUCCESS', dedupKey: `fuel_request.approved:${request.id}`,
+      metadata: { request_no: request.request_no, decided_by: userId },
+    });
+  } else if (decision === 'rejected') {
+    await notify(client, {
+      userId: request.requested_by,
+      type: 'fuel_request.rejected',
+      title: `Fuel request ${request.request_no} rejected`,
+      message: comments ? `Reason: ${comments}` : 'Your fuel request was rejected.',
+      entityType: 'fuel_request', entityId: request.id,
+      severity: 'WARNING', dedupKey: `fuel_request.rejected:${request.id}`,
+      metadata: { request_no: request.request_no, reason: comments ?? null },
+    });
+  }
   return updated[0];
 }
 
@@ -137,12 +169,12 @@ export async function issueFuel(client, { payload, userId }) {
   const { rows: inserted } = await client.query(
     `INSERT INTO fuel_transactions
        (txn_no, request_id, authorization_id, vehicle_id, fuel_type_id, tank_id, pump_id,
-        quantity, unit_price, operator_id, odometer, status, client_uuid, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'completed',$12, COALESCE($13::timestamptz, now()))
+        quantity, unit_price, operator_id, odometer, status, client_uuid, lpo_no, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'completed',$12,$13, COALESCE($14::timestamptz, now()))
      RETURNING *`,
     [txnNo, request.id, authz[0]?.id ?? null, request.vehicle_id, fuelTypeId, tankId, pumpId,
       qty, payload.unit_price ?? null, userId, payload.odometer ?? request.odometer ?? null,
-      clientUuid, payload.created_at ?? null],
+      clientUuid, payload.lpo_no ?? null, payload.created_at ?? null],
   );
 
   // THE LEDGER: immutable negative issue entry with running balance.
@@ -163,14 +195,175 @@ export async function issueFuel(client, { payload, userId }) {
       `INSERT INTO pump_readings (pump_id, reading, fuel_transaction_id, recorded_by, client_uuid, created_at)
        VALUES ($1,$2,$3,$4,$5, COALESCE($6::timestamptz, now()))`,
       [pumpId, Number(payload.pump_reading), inserted[0].id, userId,
-        clientUuid ? clientUuid + ':reading' : null, payload.created_at ?? null],
+        clientUuid, payload.created_at ?? null],
     );
   }
 
   await client.query(`UPDATE fuel_requests SET status = 'issued', updated_at = now() WHERE id = $1`, [request.id]);
+  const issueOdo = payload.odometer ?? request.odometer ?? null;
+  if (issueOdo != null) {
+    await recordOdometer(client, { vehicleId: request.vehicle_id, odometer: issueOdo,
+      source: 'fuel_transaction', refTable: 'fuel_transactions', refId: inserted[0].id,
+      enteredBy: userId, at: payload.created_at ?? null });
+  }
   await audit(client, { userId, action: 'fuel_transaction.issue', entity: 'fuel_transactions', entityId: inserted[0].id, details: { txn_no: txnNo, quantity: qty, ledger_entry: entry.id } });
+  // §52/§53 — issuing beyond the authorized quantity records the ACTUAL
+  // quantity (physical truth, never silently altered) and raises an excess
+  // approval. The approval tracks the review separately from the movement.
+  const excess = Number(request.quantity) > 0 ? +(qty - Number(request.quantity)).toFixed(3) : 0;
+  if (excess > 0.0001) {
+    await createApproval(client, {
+      entityType: 'fuel_excess',
+      entityId: inserted[0].id,
+      requestedBy: userId,
+      quantity: excess,
+      payload: { txn_no: txnNo, request_no: request.request_no, authorized: Number(request.quantity), actual: qty, excess },
+      clientUuid: clientUuid ?? null,
+      notifyTitle: 'Excess fuel approval required',
+      notifyMessage: `${request.request_no}: authorized ${request.quantity} L, issued ${qty} L (excess ${excess} L).`,
+      severity: 'WARNING',
+    });
+  }
 
   return { row: { ...inserted[0], balance_after: entry.balance_after }, duplicate: false };
+}
+
+/**
+ * §28–§36 Direct Fuel Entry — record fuel already issued WITHOUT a request.
+ * Never creates an approval; posts FUEL_ISSUE to the inventory ledger and is
+ * stamped source=DIRECT_ENTRY so reporting can distinguish it forever.
+ * §34 price rule: user-entered fueling price wins; blank → applicable cost
+ * price (last receipt price for the fuel type) — never 0, never NULL.
+ */
+export async function directFuelEntry(client, { payload, userId }) {
+  const clientUuid = payload.client_uuid || null;
+  const existing = await findByClientUuid(client, 'fuel_transactions', clientUuid);
+  if (existing) return { row: existing, duplicate: true, price_source: 'UNCHANGED' };
+
+  const qty = Number(payload.quantity);
+  if (!Number.isFinite(qty) || qty <= 0) throw new ApiError(400, 'quantity must be > 0');
+
+  // Vehicle + fuel type must be real and active.
+  const { rows: veh } = await client.query('SELECT id, plate, active FROM vehicles WHERE id = $1', [payload.vehicle_id]);
+  if (!veh.length) throw new ApiError(400, 'Vehicle not found');
+  if (!veh[0].active) throw new ApiError(400, 'Vehicle is inactive');
+  const { rows: ft } = await client.query('SELECT id, name, active FROM fuel_types WHERE id = $1', [payload.fuel_type_id]);
+  if (!ft.length) throw new ApiError(400, 'Fuel type not found');
+  if (!ft[0].active) throw new ApiError(400, 'Fuel type is inactive');
+
+  // Resolve pump → tank (or explicit tank). Tank's fuel must match.
+  let tankId = null;
+  let pumpId = null;
+  if (payload.pump_id) {
+    const { rows: pump } = await client.query('SELECT id, tank_id, active FROM pumps WHERE id = $1', [payload.pump_id]);
+    if (!pump.length) throw new ApiError(400, 'Pump not found');
+    if (!pump[0].active) throw new ApiError(400, 'Pump is inactive');
+    pumpId = pump[0].id;
+    tankId = pump[0].tank_id;
+  } else if (payload.tank_id) {
+    tankId = payload.tank_id;
+  } else {
+    throw new ApiError(400, 'Either pump_id or tank_id is required');
+  }
+  const { rows: tank } = await client.query('SELECT id, fuel_type_id, active FROM tanks WHERE id = $1', [tankId]);
+  if (!tank.length) throw new ApiError(400, 'Tank not found');
+  if (!tank[0].active) throw new ApiError(400, 'Tank is inactive');
+  if (tank[0].fuel_type_id !== payload.fuel_type_id) throw new ApiError(400, 'Tank does not hold that fuel type');
+
+  // §34 — applicable cost price = latest receipt price for this fuel type.
+  const { rows: costRow } = await client.query(
+    `SELECT unit_price FROM purchases
+      WHERE fuel_type_id = $1 AND unit_price IS NOT NULL AND unit_price > 0
+      ORDER BY created_at DESC LIMIT 1`, [payload.fuel_type_id]);
+  const costPrice = costRow.length ? Number(costRow[0].unit_price) : null;
+
+  let appliedPrice;
+  let priceSource;
+  if (payload.unit_price != null && payload.unit_price !== '' && Number(payload.unit_price) > 0) {
+    appliedPrice = Number(payload.unit_price);
+    priceSource = 'USER ENTERED';
+  } else {
+    if (costPrice == null) throw new ApiError(400, 'No cost price on record for this fuel type — enter a fueling price');
+    appliedPrice = costPrice;
+    priceSource = 'COST PRICE';
+  }
+
+  // Same physical-impossibility guard as issueFuel: stock never goes negative.
+  const { rows: bal } = await client.query(
+    `SELECT COALESCE(SUM(quantity),0)::float AS balance FROM inventory_transactions
+      WHERE fuel_type_id = $1 AND tank_id = $2`, [payload.fuel_type_id, tankId]);
+  if (bal[0].balance - qty < -0.001) {
+    throw new ApiError(409, `Insufficient fuel in tank: available ${bal[0].balance} L, requested ${qty} L`);
+  }
+
+  // Pump meter sanity: end must not be before start.
+  const pumpStart = payload.pump_start != null && payload.pump_start !== '' ? Number(payload.pump_start) : null;
+  const pumpEnd = payload.pump_end != null && payload.pump_end !== '' ? Number(payload.pump_end) : null;
+  if (pumpStart != null && pumpEnd != null && pumpEnd < pumpStart) {
+    throw new ApiError(400, 'Pump end reading cannot be less than the start reading');
+  }
+
+  const txnNo = await nextDocNumber(client, 'transaction');
+  const { rows: inserted } = await client.query(
+    `INSERT INTO fuel_transactions
+       (txn_no, request_id, authorization_id, vehicle_id, fuel_type_id, tank_id, pump_id,
+        quantity, unit_price, unit_cost, operator_id, odometer, status, client_uuid, lpo_no,
+        source, destination, purpose, remarks, pump_start, pump_end, created_at)
+     VALUES ($1,NULL,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,$12,'DIRECT_ENTRY',$13,$14,$15,$16,$17,
+             COALESCE($18::timestamptz, now()))
+     RETURNING *`,
+    [txnNo, payload.vehicle_id, payload.fuel_type_id, tankId, pumpId,
+      qty, appliedPrice, costPrice, userId, payload.odometer ?? null,
+      clientUuid, payload.lpo_no ?? null, payload.destination ?? null, payload.purpose ?? null, payload.remarks ?? null,
+      pumpStart, pumpEnd, payload.transaction_date ?? null]);
+
+  // THE LEDGER — same immutable negative issue entry as workflow issues.
+  const entry = await postLedgerEntry(client, {
+    entry_type: 'issue',
+    fuel_type_id: payload.fuel_type_id,
+    tank_id: tankId,
+    quantity: -qty,
+    ref_table: 'fuel_transactions',
+    ref_id: inserted[0].id,
+    description: `Direct entry ${qty} L — ${veh[0].plate}${payload.destination ? ` to ${payload.destination}` : ''}`,
+    performed_by: userId,
+    at: payload.transaction_date ?? null, // ledger row dated as entered, not today
+  });
+
+  // Meter truth for reconciliation: record the end reading like a handover.
+  if (pumpId && pumpEnd != null) {
+    await client.query(
+      `INSERT INTO pump_readings (pump_id, reading, fuel_transaction_id, recorded_by, client_uuid, created_at)
+       VALUES ($1,$2,$3,$4,$5, COALESCE($6::timestamptz, now()))`,
+      [pumpId, pumpEnd, inserted[0].id, userId, clientUuid, payload.transaction_date ?? null]);
+  }
+
+  if (payload.odometer != null) {
+    await recordOdometer(client, { vehicleId: payload.vehicle_id, odometer: payload.odometer,
+      source: 'fuel_transaction', refTable: 'fuel_transactions', refId: inserted[0].id,
+      enteredBy: userId, at: payload.transaction_date ?? null });
+  }
+
+  await audit(client, {
+    userId,
+    action: 'DIRECT_FUEL_ENTRY_CREATED',
+    entity: 'fuel_transactions', entityId: inserted[0].id,
+    details: { txn_no: txnNo, vehicle: veh[0].plate, quantity: qty, tank_id: tankId, pump_id: pumpId,
+      fueling_price: appliedPrice, price_source: priceSource, unit_cost: costPrice,
+      destination: payload.destination ?? null, ledger_entry: entry.id },
+  });
+
+  await notifyRoles(client, ['manager', 'admin'], {
+    type: 'fuel_entry.direct',
+    title: 'Direct fuel entry recorded',
+    message: `${veh[0].plate}: ${qty} L (${txnNo}) by direct entry — no request workflow.`,
+    entityType: 'fuel_transaction', entityId: inserted[0].id,
+    severity: 'INFO',
+    dedupKey: `fuel_entry.direct:${inserted[0].id}`,
+    metadata: { txn_no: txnNo, quantity: qty },
+  }, { excludeUserId: userId });
+
+  return { row: { ...inserted[0], balance_after: entry.balance_after }, duplicate: false, price_source: priceSource };
 }
 
 /** Reverse a completed issue (manager/admin) — restores stock, keeps history. */
@@ -264,6 +457,23 @@ export async function createReceipt(client, { payload, userId }) {
     performed_by: userId,
   });
 
+  // §21 — fuel purchase → fuel inventory + supplier payable. Optional: only
+  // when the receipt names a supplier account. One authoritative ledger entry.
+  if (payload.supplier_id) {
+    const isU = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(payload.supplier_id));
+    if (!isU) throw new ApiError(400, 'supplier_id must be a valid id');
+    if (payload.unit_price == null) throw new ApiError(400, 'unit_price is required when recording the purchase against a supplier account');
+    const { rows: sup } = await client.query('SELECT id, name FROM suppliers WHERE id = $1', [payload.supplier_id]);
+    if (!sup.length) throw new ApiError(400, 'Supplier not found');
+    const payable = +(qty * Number(payload.unit_price)).toFixed(2);
+    await client.query(
+      `INSERT INTO supplier_ledger_entries
+         (supplier_id, entry_type, entry_date, reference, description, debit, source_table, source_id, created_by)
+       VALUES ($1,'PURCHASE', COALESCE($2::date, CURRENT_DATE),$3,$4,$5,'purchases',$6,$7)`,
+      [payload.supplier_id, payload.created_at ?? null, payload.invoice_no || receiptNo,
+        `Fuel purchase ${receiptNo} — ${qty} L @ ${payload.unit_price}`, payable, rows[0].id, userId]);
+  }
+
   await audit(client, { userId, action: 'purchase.receipt', entity: 'purchases', entityId: rows[0].id, details: { receipt_no: receiptNo, quantity: qty } });
   return { row: { ...rows[0], balance_after: entry.balance_after }, duplicate: false };
 }
@@ -308,7 +518,13 @@ export async function createAdjustment(client, { payload, userId }) {
 /** Record a pump meter or tank dip reading. */
 export async function createReading(client, { payload, userId }) {
   const type = payload.type === 'tank' ? 'tank' : 'pump';
-  const clientUuid = payload.client_uuid ? (type === 'pump' ? payload.client_uuid : payload.client_uuid + ':tank') : null;
+  // client_uuid columns are Postgres type `uuid` — the op_id must go in
+  // UNMODIFIED (the old ':tank' suffix made every tank-reading op crash with
+  // `invalid input syntax for type uuid`). Uniqueness is per table, so the
+  // same value as the parent op is safe and replay-idempotent.
+  const clientUuid = payload.client_uuid || null;
+  const existing = await findByClientUuid(client, type === 'pump' ? 'pump_readings' : 'tank_readings', clientUuid);
+  if (existing) return { row: existing, kind: type, duplicate: true };
   if (type === 'pump') {
     if (!payload.pump_id) throw new ApiError(400, 'pump_id is required');
     const value = Number(payload.reading);

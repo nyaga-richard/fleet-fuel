@@ -77,6 +77,7 @@ router.post('/:id/approve', requireRole('manager', 'admin'), asyncH(async (req, 
 router.post('/:id/reject', requireRole('manager', 'admin'), asyncH(async (req, res) => {
   if (!isUuid(req.params.id)) throw notFound('Request not found');
   const comments = needStr(req.body, 'comments', { max: 500, optional: true });
+  if (!comments || !comments.trim()) throw bad('A rejection reason is required (§19)');
   const row = await tx((client) =>
     decideFuelRequest(client, { requestId: req.params.id, decision: 'rejected', userId: req.user.sub, comments }));
   res.json({ request: row });

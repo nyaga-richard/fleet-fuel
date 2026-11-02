@@ -5,6 +5,40 @@ export function apiUrl(path) {
   return base + path;
 }
 
+// Authenticated file download (reports/exports §43): same token as api(),
+// returns a Blob plus the server-suggested filename.
+export async function apiBlob(path) {
+  const token = getToken();
+  const res = await fetch(apiUrl(path), {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    let msg = `Export failed (${res.status})`;
+    try { const j = await res.json(); if (j.error) msg = j.error; } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+  const cd = res.headers.get('content-disposition') || '';
+  const m = /filename="?([^";]+)"?/.exec(cd);
+  return { blob: await res.blob(), filename: m ? m[1] : 'download' };
+}
+
+export function downloadBlob(blob, filename) {
+  // Guard: apiBlob() returns { blob, filename } — accept both shapes but never
+  // hand a non-Blob to URL.createObjectURL (it throws "Overload resolution
+  // failed" with no hint about the cause).
+  if (blob && typeof blob === 'object' && typeof blob.blob !== 'function' && blob.blob instanceof Blob) {
+    blob = blob.blob;
+  }
+  if (!(blob instanceof Blob)) {
+    throw new Error('Download failed — the server response was not a file.');
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
 export function getToken() {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('ff_token');

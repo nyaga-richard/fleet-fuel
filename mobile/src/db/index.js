@@ -27,6 +27,20 @@ function uuid4() {
   });
 }
 
+// ── Startup gate ─────────────────────────────────────────────────────────────
+// On a FRESH install the tables don't exist until initDb's DDL completes.
+// Parallel callers (AppState resume probe, sync triggers, login notice,
+// screen focus effects) used to race it and crash with
+// "no such table: kv". Every exported helper now awaits this memoized
+// promise once; a failed init clears the gate so the next call retries.
+let readyPromise = null;
+export function dbReady() {
+  if (!readyPromise) {
+    readyPromise = initDb().catch((err) => { readyPromise = null; throw err; });
+  }
+  return readyPromise;
+}
+
 export async function initDb() {
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
@@ -66,6 +80,16 @@ export async function initDb() {
       fuel_type_id TEXT, quantity REAL, status TEXT, driver_name TEXT,
       created_at TEXT, updated_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY, title TEXT, message TEXT, type TEXT,
+      severity TEXT, entity_type TEXT, entity_id TEXT,
+      is_read INTEGER DEFAULT 0, created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS ledger_cache (
+      cache_key  TEXT PRIMARY KEY,
+      data       TEXT NOT NULL,
+      fetched_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS transactions (
       id TEXT PRIMARY KEY, txn_no TEXT, request_id TEXT, vehicle_id TEXT, plate TEXT,
       fuel_type_id TEXT, quantity REAL, status TEXT, created_at TEXT, updated_at TEXT
@@ -75,19 +99,23 @@ export async function initDb() {
 
 // ── Key-value helpers (token, user, sync timestamps, device id) ─────────────
 export async function kvGet(key) {
+  await dbReady();
   const row = await db.getFirstAsync('SELECT value FROM kv WHERE key = ?', [key]);
   return row?.value ?? null;
 }
 
 export async function kvSet(key, value) {
+  await dbReady();
   await db.runAsync('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, String(value)]);
 }
 
 export async function kvRemove(key) {
+  await dbReady();
   await db.runAsync('DELETE FROM kv WHERE key = ?', [key]);
 }
 
 export async function deviceId() {
+  await dbReady();
   let id = await kvGet('device_id');
   if (!id) {
     const label = Constants?.deviceName || 'device';
@@ -99,6 +127,7 @@ export async function deviceId() {
 
 // ── Outbox (pending ops) ─────────────────────────────────────────────────────
 export async function enqueue(type, payload) {
+  await dbReady();
   const opId = uuid4();
   await db.runAsync(
     'INSERT INTO outbox (op_id, type, payload, created_at) VALUES (?, ?, ?, ?)',
@@ -108,38 +137,49 @@ export async function enqueue(type, payload) {
 }
 
 export async function pendingOps(limit = 100) {
+  await dbReady();
   return db.getAllAsync(
     'SELECT * FROM outbox ORDER BY created_at ASC LIMIT ?', [limit],
   );
 }
 
 // Ops the push loop should still try (exhausted ones are parked, not deleted).
+// Cap is HIGH on purpose: a business rejection (e.g. "insufficient fuel in
+// tank") is often TEMPORARY — a bulk receipt recorded later makes the same op
+// valid. Fuel ops must keep retrying for days, not die after a few minutes.
+// Truly poisoned ops eventually park here and recover via Sync → Reset & retry.
 export async function opsNeedingPush(limit = 200) {
+  await dbReady();
   return db.getAllAsync(
-    'SELECT * FROM outbox WHERE retry_count < 8 ORDER BY created_at ASC LIMIT ?', [limit],
+    'SELECT * FROM outbox WHERE retry_count < 100 ORDER BY created_at ASC LIMIT ?', [limit],
   );
 }
 
 // Give parked (exhausted) ops another chance — operator action, never automatic.
 export async function resetRetries() {
+  await dbReady();
   await db.runAsync('UPDATE outbox SET retry_count = 0, last_error = NULL WHERE retry_count >= 8');
 }
 
 export async function opStillQueued(opId) {
+  await dbReady();
   const row = await db.getFirstAsync('SELECT 1 AS x FROM outbox WHERE op_id = ?', [opId]);
   return !!row;
 }
 
 export async function outboxCount() {
+  await dbReady();
   const row = await db.getFirstAsync('SELECT count(*) AS n FROM outbox');
   return row?.n ?? 0;
 }
 
 export async function removeOp(opId) {
+  await dbReady();
   await db.runAsync('DELETE FROM outbox WHERE op_id = ?', [opId]);
 }
 
 export async function failOp(opId, error) {
+  await dbReady();
   await db.runAsync(
     'UPDATE outbox SET retry_count = retry_count + 1, last_error = ? WHERE op_id = ?',
     [String(error).slice(0, 300), opId],
@@ -147,6 +187,7 @@ export async function failOp(opId, error) {
 }
 
 export async function wipeLocalData() {
+  await dbReady();
   await db.execAsync(
     `DELETE FROM outbox; DELETE FROM vehicles; DELETE FROM fuel_types;
      DELETE FROM tanks; DELETE FROM pumps; DELETE FROM requests; DELETE FROM transactions;
@@ -156,28 +197,35 @@ export async function wipeLocalData() {
 
 // ── Cached reference/operational reads (instant, offline) ────────────────────
 export async function cachedVehicles() {
+  await dbReady();
   return db.getAllAsync('SELECT * FROM vehicles WHERE active = 1 ORDER BY plate');
 }
 export async function cachedFuelTypes() {
+  await dbReady();
   return db.getAllAsync('SELECT * FROM fuel_types WHERE active = 1 ORDER BY name');
 }
 export async function cachedTanks() {
+  await dbReady();
   return db.getAllAsync('SELECT * FROM tanks WHERE active = 1 ORDER BY name');
 }
 export async function cachedPumps() {
+  await dbReady();
   return db.getAllAsync(
     'SELECT p.*, t.name AS tank_name FROM pumps p LEFT JOIN tanks t ON t.id = p.tank_id WHERE p.active = 1 ORDER BY p.name');
 }
 export async function cachedRequests(limit = 100) {
+  await dbReady();
   return db.getAllAsync(
     'SELECT * FROM requests ORDER BY created_at DESC LIMIT ?', [limit]);
 }
 export async function cachedTransactions(limit = 100) {
+  await dbReady();
   return db.getAllAsync(
     'SELECT * FROM transactions ORDER BY created_at DESC LIMIT ?', [limit]);
 }
 
 export async function replaceReferenceData(pull) {
+  await dbReady();
   const now = new Date().toISOString();
   await db.execAsync('BEGIN TRANSACTION');
   try {
@@ -230,4 +278,52 @@ export async function replaceReferenceData(pull) {
     await db.execAsync('ROLLBACK');
     throw err;
   }
+}
+
+// ── Notifications cache (server is authority; this is the offline view) ──────
+// ── Fuel Ledger cache (§20/§39): last server answer per filter combination,
+// so the ledger screen works offline exactly like the rest of the app. ────────
+export async function saveLedgerCache(cacheKey, dataset) {
+  await db.runAsync(
+    `INSERT INTO ledger_cache (cache_key, data, fetched_at) VALUES (?, ?, ?)
+     ON CONFLICT(cache_key) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at`,
+    [cacheKey, JSON.stringify(dataset), new Date().toISOString()],
+  );
+}
+
+export async function loadLedgerCache(cacheKey) {
+  const row = await db.getFirstAsync('SELECT data, fetched_at FROM ledger_cache WHERE cache_key = ?', [cacheKey]);
+  if (!row) return null;
+  try { return { dataset: JSON.parse(row.data), fetched_at: row.fetched_at }; } catch { return null; }
+}
+
+export async function replaceNotifications(rows) {
+  await dbReady();
+  await db.runAsync('DELETE FROM notifications');
+  for (const n of rows || []) {
+    await db.runAsync(
+      'INSERT OR REPLACE INTO notifications (id, title, message, type, severity, entity_type, entity_id, is_read, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      [n.id, n.title, n.message ?? '', n.type ?? '', n.severity ?? 'INFO', n.entity_type ?? '', n.entity_id ?? '', n.is_read ? 1 : 0, n.created_at]);
+  }
+}
+
+export async function cachedNotifications(limit = 100) {
+  await dbReady();
+  return db.getAllAsync('SELECT * FROM notifications ORDER BY created_at DESC LIMIT ?', [limit]);
+}
+
+export async function localUnreadCount() {
+  await dbReady();
+  const row = await db.getFirstAsync('SELECT count(*) AS n FROM notifications WHERE is_read = 0');
+  return row?.n ?? 0;
+}
+
+export async function markLocalRead(id) {
+  await dbReady();
+  await db.runAsync('UPDATE notifications SET is_read = 1 WHERE id = ?', [id]);
+}
+
+export async function markAllLocalRead() {
+  await dbReady();
+  await db.runAsync('UPDATE notifications SET is_read = 1');
 }

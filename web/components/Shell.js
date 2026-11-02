@@ -13,19 +13,36 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
+import { useTheme, THEMES } from '@/lib/theme';
 
+// Navigation IA (§22/§26/§49) — logical groups, role-filtered. The Fuel
+// Requests badge (§28) is the only nav badge — it IS pending work.
 const NAV = [
   { group: 'Overview', links: [
     { href: '/', label: 'Dashboard', roles: ['admin', 'manager', 'attendant'], icon: 'dash' },
-    { href: '/ledger', label: 'Fuel Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'book' },
   ]},
   { group: 'Operations', links: [
-    { href: '/requests', label: 'Fuel Requests', roles: ['admin', 'manager', 'attendant'], icon: 'file' },
+    { href: '/requests', label: 'Fuel Requests', roles: ['admin', 'manager', 'attendant'], icon: 'file', badge: 'requests' },
     { href: '/issue', label: 'Issue Fuel', roles: ['admin', 'manager', 'attendant'], icon: 'drop' },
-    { href: '/inventory', label: 'Inventory', roles: ['admin', 'manager', 'attendant'], icon: 'box' },
+    { href: '/direct-entry', label: 'Direct Fuel Entry', roles: ['admin', 'manager'], icon: 'drop' },
+    { href: '/external-fuel', label: 'External Fuel', roles: ['admin', 'manager'], icon: 'drop' },
+    { href: '/trips', label: 'Trips', roles: ['admin', 'manager'], icon: 'file' },
+    { href: '/approvals', label: 'Approvals', roles: ['admin', 'manager'], icon: 'file' },
   ]},
-  { group: 'Administration', links: [
+  { group: 'Fleet', links: [
     { href: '/vehicles', label: 'Vehicles', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },
+    { href: '/tires', label: 'Tires', roles: ['admin', 'manager'], icon: 'chip' },
+  ]},
+  { group: 'Inventory & Suppliers', links: [
+    { href: '/ledger', label: 'Fuel Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'book' },
+    { href: '/vehicle-ledger', label: 'Vehicle Ledger', roles: ['admin', 'manager', 'attendant'], icon: 'truck' },
+    { href: '/inventory', label: 'Inventory', roles: ['admin', 'manager', 'attendant'], icon: 'box' },
+    { href: '/suppliers', label: 'Suppliers', roles: ['admin', 'manager'], icon: 'users' },
+  ]},
+  { group: 'Reports', links: [
+    { href: '/reports', label: 'Reports', roles: ['admin', 'manager'], icon: 'file' },
+  ]},
+  { group: 'System', links: [
     { href: '/configuration', label: 'Configuration', roles: ['admin', 'manager'], icon: 'sliders' },
     { href: '/users', label: 'Users', roles: ['admin'], icon: 'users' },
     { href: '/system', label: 'System', roles: ['admin', 'manager', 'attendant'], icon: 'chip' },
@@ -105,6 +122,7 @@ export default function Shell({ children }) {
             <Link key={l.href} href={l.href} className={pathname === l.href ? 'active' : ''} title={l.label}>
               <Icon name={l.icon} />
               <span className="nav-label">{l.label}</span>
+              {l.badge === 'requests' && isDecider && alerts > 0 && <span className="nav-badge" aria-label={`${alerts} pending requests`}>{alerts > 99 ? '99+' : alerts}</span>}
             </Link>
           ))}
         </div>
@@ -121,7 +139,7 @@ export default function Shell({ children }) {
         </button>
         <span className="topbar-brand">Fleet Fuel</span>
         <GlobalSearch user={user} compact />
-        <AlertBell count={isDecider ? alerts : 0} />
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><AlertBell count={isDecider ? alerts : 0} /><NotifBell /></span>
         <UserChip user={user} menu={menu} setMenu={setMenu} logout={logout} compact />
       </header>
 
@@ -148,12 +166,21 @@ export default function Shell({ children }) {
         </div>
       )}
 
+      {/* Mobile bottom navigation (§4): primary destinations; More opens the drawer */}
+      <nav className="mobilenav" aria-label="Primary">
+        <Link href="/" className={pathname === '/' ? 'active' : ''}>Home</Link>
+        <Link href="/requests" className={pathname === '/requests' ? 'active' : ''}>Requests{isDecider && alerts > 0 ? ` (${alerts})` : ''}</Link>
+        <Link href="/issue" className={pathname === '/issue' ? 'active' : ''}>Fueling</Link>
+        <Link href="/ledger" className={pathname === '/ledger' ? 'active' : ''}>Ledger</Link>
+        <button type="button" onClick={() => setDrawer(true)} aria-label="More menu">More</button>
+      </nav>
+
       <main className="main">
         <div className="page-head desktop-only">
           <h1>{currentTitle(NAV, pathname)}</h1>
           <div className="head-actions">
             <GlobalSearch user={user} />
-            <AlertBell count={isDecider ? alerts : 0} />
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><AlertBell count={isDecider ? alerts : 0} /><NotifBell /></span>
             <UserChip user={user} menu={menu} setMenu={setMenu} logout={logout} />
           </div>
         </div>
@@ -166,6 +193,84 @@ export default function Shell({ children }) {
 function currentTitle(nav, path) {
   for (const g of nav) for (const l of g.links) if (l.href === path) return l.label;
   return 'Fleet Fuel';
+}
+
+
+// Notification center bell (§31) — unread count polled; panel lists recent
+// notifications, opening one marks it read and navigates to the entity (§33).
+function NotifBell() {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState([]);
+  const [unread, setUnread] = useState(0);
+  const ref = useRef(null);
+
+  const load = useCallback(async () => {
+    try {
+      const d = await api('/api/notifications?limit=12');
+      setItems(d.notifications || []); setUnread(d.unread || 0);
+    } catch { /* offline — keep last */ }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  useEffect(() => {
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  async function openItem(n) {
+    if (!n.is_read) {
+      setItems((xs) => xs.map((x) => (x.id === n.id ? { ...x, is_read: true } : x)));
+      setUnread((u) => Math.max(0, u - 1));
+      api('/api/notifications/' + n.id + '/read', { method: 'PATCH' }).catch(() => {});
+    }
+    const href = n.entity_type === 'fuel_request' ? '/requests'
+      : n.entity_type === 'fuel_transaction' ? '/issue'
+      : n.entity_type === 'ledger' ? '/ledger'
+      : n.entity_type === 'approval' ? '/requests'
+      : null;
+    setOpen(false);
+    if (href) window.location.assign(href);
+  }
+
+  return (
+    <span className="notif-wrap" ref={ref}>
+      <button className="bell" onClick={() => { setOpen(!open); if (!open) load(); }}
+        aria-haspopup="menu" aria-expanded={open} aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'}>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" /></svg>
+        {unread > 0 && <span className="bell-badge">{unread > 9 ? '9+' : unread}</span>}
+      </button>
+      {open && (
+        <div className="notif-panel" role="menu">
+          <div className="notif-head">
+            <b>Notifications</b>
+            {unread > 0 && (
+              <button className="notif-markall" onClick={async () => {
+                setItems((xs) => xs.map((x) => ({ ...x, is_read: true }))); setUnread(0);
+                api('/api/notifications/read-all', { method: 'PATCH' }).catch(() => {});
+              }}>Mark all as read</button>
+            )}
+          </div>
+          {items.length === 0 && <div className="notif-empty">You're all caught up.</div>}
+          {items.map((n) => (
+            <button key={n.id} className={'notif-item' + (n.is_read ? '' : ' unread')} onClick={() => openItem(n)}>
+              <span className={'notif-dot sev-' + (n.severity || 'INFO').toLowerCase()} />
+              <span className="notif-body">
+                <b>{n.title}</b>
+                {n.message && <span className="notif-msg">{n.message}</span>}
+                <span className="notif-time">{new Date(n.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', hour12: false })}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
 }
 
 function AlertBell({ count }) {
@@ -198,9 +303,32 @@ function UserChip({ user, menu, setMenu, logout, compact }) {
             <div className="muted" style={{ fontSize: 12 }}>{user?.email}</div>
             <span className="pill" style={{ marginTop: 6, textTransform: 'capitalize', borderColor: 'var(--accent)', color: 'var(--accent-2)' }}>{user?.role}</span>
           </div>
+          <ThemePicker />
           <button role="menuitem" onClick={logout}>Sign out</button>
         </div>
       )}
+    </div>
+  );
+}
+
+// §34/§41 — Appearance picker: LIGHT / DARK / SYSTEM. Applies instantly via
+// the theme context (tokens flip app-wide), persists locally + server-side.
+function ThemePicker() {
+  const { theme, setTheme } = useTheme();
+  const labels = { LIGHT: 'Light', DARK: 'Dark', SYSTEM: 'System' };
+  return (
+    <div className="theme-picker" role="radiogroup" aria-label="Appearance">
+      {THEMES.map((t) => (
+        <button
+          key={t}
+          role="radio"
+          aria-checked={theme === t}
+          className={'theme-opt' + (theme === t ? ' on' : '')}
+          onClick={() => setTheme(t)}
+        >
+          {labels[t]}
+        </button>
+      ))}
     </div>
   );
 }

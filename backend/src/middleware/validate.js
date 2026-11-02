@@ -60,3 +60,23 @@ export function optUuid(body, field) {
   if (!isUuid(v)) throw bad(`Field "${field}" must be a UUID`);
   return v;
 }
+
+export function optNum(body, field, { min, max } = {}) {
+  const v = body?.[field];
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new ApiError(400, `${field} must be a number`);
+  if (min !== undefined && n < min) throw new ApiError(400, `${field} must be at least ${min}`);
+  if (max !== undefined && n > max) throw new ApiError(400, `${field} must be at most ${max}`);
+  return n;
+}
+
+export function optStr(body, field, { max = 500 } = {}) {
+  const v = body?.[field];
+  if (v === undefined || v === null || v === '') return null;
+  if (typeof v !== 'string') throw new ApiError(400, `${field} must be a string`);
+  const t = v.trim();
+  if (!t) return null;
+  if (t.length > max) throw new ApiError(400, `${field} must be at most ${max} characters`);
+  return t;
+}

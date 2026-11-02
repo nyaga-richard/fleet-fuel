@@ -1,18 +1,33 @@
 'use client';
-// Dashboard — KPI cards, 14-day usage chart, recent activity.
-// All numbers come from live APIs (stock snapshot, requests, transactions).
+// Dashboard (§51 responsive overview) — KPI cards + charts only, no data
+// tables: a quick-glance operations overview. Everything is real API data;
+// attendants simply don't see the manager/admin sections (server RBAC).
+//
+// Layout:
+//   1. Stock + today KPIs (per fuel type, issued today, pending, approvals)
+//   2. Fuel consumption — interactive stacked area chart (90d series)
+//   3. Fuel split donut (30d) + fleet KPIs
+//   4. Pending requests & recent activity as compact cards
+//   5. Top consumers as ranked bars (visual, not a table)
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as PieTooltip } from 'recharts';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, Stat, DataTable, StatusPill, Notice, Skeleton, EmptyState } from '@/components/ui';
+import { Card, PageHeader, Stat, StatusPill, Notice, Skeleton, EmptyState } from '@/components/ui';
+import UsageAreaChart from '@/components/usage-area-chart';
 import { api } from '@/lib/api';
-import { fmtQty, fmtDateTime, fmtNum } from '@/lib/format';
+import { useAuth } from '@/lib/auth';
+import { fmtQty, fmtDateTime, fmtNum, fmtKES } from '@/lib/format';
+
+const DONUT_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--muted)'];
 
 export default function DashboardPage() {
   return <Shell><Dashboard /></Shell>;
 }
 
 function Dashboard() {
+  const { user } = useAuth();
+  const isDecider = user?.role === 'admin' || user?.role === 'manager';
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
 
@@ -20,12 +35,16 @@ function Dashboard() {
     const from = new Date(Date.now() - 13 * 86400000).toISOString().slice(0, 10);
     Promise.all([
       api('/api/inventory/stock'),
-      api('/api/requests?status=pending&limit=8'),
-      api(`/api/transactions?from=${from}&limit=500`),
+      api('/api/requests?status=pending&limit=6'),
+      api(`/api/transactions?from=${from}&limit=300`),
       api('/api/system/version'),
-    ]).then(([stock, requests, txns, version]) => setData({ stock, requests, txns, version }))
+      api('/api/dashboard/usage?days=90').catch(() => null),
+      api('/api/reports/fleet-dashboard').catch(() => null), // attendants lack reports:view — section hides
+      isDecider ? api('/api/approvals?status=PENDING&pageSize=6').catch(() => null) : Promise.resolve(null),
+    ]).then(([stock, requests, txns, version, usage, fleet, approvals]) =>
+      setData({ stock, requests, txns, version, usage, fleet, approvals }))
       .catch((e) => setError(e.message));
-  }, []);
+  }, [isDecider]);
 
   if (error) return <Notice kind="error">{error}</Notice>;
   if (!data) {
@@ -40,10 +59,15 @@ function Dashboard() {
     );
   }
 
+  const fleet = data.fleet;
+  const fleetKpi = Object.fromEntries((fleet?.summary || []).map((s) => [s.label, s.value]));
   const stock = data.stock.by_fuel_type || [];
   const tanks = data.stock.by_tank || [];
   const txns = data.txns.transactions || [];
   const pending = (data.requests.requests || []).length;
+  const pendingApprovals = data.approvals?.counts?.PENDING ?? 0;
+  const usage30 = (data.usage?.series || []).slice(-30);
+  const donut = (data.usage?.by_fuel_type || []).filter((d) => Number(d.litres) > 0);
 
   const todayKey = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi' }).format(new Date());
   const issuedToday = txns
@@ -54,73 +78,116 @@ function Dashboard() {
     <>
       <PageHeader title="Dashboard" subtitle="Live fuel position and activity" />
 
+      {/* ── 1. KPI row ── */}
       <div className="grid c4" style={{ marginBottom: 18 }}>
         {stock.map((s) => <StockCard key={s.id} s={s} tanks={tanks} />)}
-        <Stat label="Issued today" value={fmtQty(issuedToday)} sub="all fuel types" tone="#60a5fa" />
+        <Stat label="Issued today" value={fmtQty(issuedToday)} sub="all fuel types" tone="var(--chart-1)" />
         <Stat
           label="Pending requests"
           value={fmtNum(pending)}
           sub={pending > 0 ? 'awaiting authorization' : 'all clear'}
-          tone={pending > 0 ? '#f59e0b' : '#22c55e'}
+          tone={pending > 0 ? 'var(--amber)' : 'var(--green)'}
         />
+        {isDecider && (
+          <Stat
+            label="Pending approvals"
+            value={fmtNum(pendingApprovals)}
+            sub={pendingApprovals > 0 ? 'decisions waiting' : 'nothing to decide'}
+            tone={pendingApprovals > 0 ? 'var(--red)' : 'var(--green)'}
+          />
+        )}
       </div>
 
-      <Card title="Fuel issued — last 14 days" actions={<Link href="/ledger">Open ledger →</Link>}>
-        <UsageChart txns={txns} />
-      </Card>
+      {/* ── 2. Interactive consumption chart ── */}
+      <UsageAreaChart />
 
-      <Card title="Recent fuel transactions" actions={<Link href="/issue">Issue fuel →</Link>}>
-        <DataTable
-          columns={[
-            { key: 'txn_no', label: 'Txn' },
-            { key: 'created_at', label: 'Date', render: (r) => fmtDateTime(r.created_at) },
-            { key: 'plate', label: 'Vehicle' },
-            { key: 'fuel_type_name', label: 'Fuel' },
-            { key: 'quantity', label: 'Quantity', num: true, render: (r) => fmtQty(r.quantity) },
-            { key: 'operator_name', label: 'Operator', render: (r) => r.operator_name || '—' },
-            { key: 'status', label: 'Status', render: (r) => <StatusPill status={r.status} /> },
-          ]}
-          rows={txns.slice(0, 25)}
-          mobileCard={(r) => (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                <b className="mono">{r.txn_no}</b>
-                <StatusPill status={r.status} />
+      {/* ── 3. Split donut + fleet KPIs ── */}
+      <div className="grid c2" style={{ gap: 16, marginTop: 16 }}>
+        <Card title="Fuel split — last 30 days" actions={<Link href="/inventory" className="muted" style={{ fontSize: 12 }}>Inventory →</Link>}>
+          {donut.length ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ width: 190, height: 190, flexShrink: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={donut} dataKey="litres" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={3} strokeWidth={0} isAnimationActive={false}>
+                      {donut.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                    </Pie>
+                    <PieTooltip content={<DonutTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
-              <div style={{ margin: '5px 0 3px', fontWeight: 600 }}>{r.plate} · {fmtQty(r.quantity)} {r.fuel_type_name}</div>
-              <div className="muted" style={{ fontSize: 12 }}>{fmtDateTime(r.created_at)}</div>
-            </>
-          )}
-          empty="No fuel issued yet"
-          pageSize={10}
-        />
-      </Card>
+              <div style={{ display: 'grid', gap: 8, fontSize: 13, flex: 1, minWidth: 140 }}>
+                {donut.map((d, i) => (
+                  <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3, background: DONUT_COLORS[i % DONUT_COLORS.length], flexShrink: 0 }} />
+                    <span className="muted" style={{ flex: 1 }}>{d.name}</span>
+                    <b>{fmtQty(d.litres)} L</b>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : <EmptyState icon="◔" title="No fuel data" message="Fuel issued or purchased in the last 30 days will chart here." />}
+        </Card>
 
-      <Card title="Pending fuel requests" actions={<Link href="/requests">All requests →</Link>}>
-        <DataTable
-          columns={[
-            { key: 'request_no', label: 'Request' },
-            { key: 'created_at', label: 'Date', render: (r) => fmtDateTime(r.created_at) },
-            { key: 'plate', label: 'Vehicle' },
-            { key: 'fuel_type_name', label: 'Fuel' },
-            { key: 'quantity', label: 'Quantity', num: true, render: (r) => fmtQty(r.quantity) },
-            { key: 'requested_by_name', label: 'Requested by', render: (r) => r.requested_by_name || '—' },
-          ]}
-          rows={data.requests.requests || []}
-          mobileCard={(r) => (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                <b className="mono">{r.request_no || '—'}</b>
-                <StatusPill status={r.status} />
-              </div>
-              <div style={{ margin: '5px 0 3px', fontWeight: 600 }}>{r.plate} · {fmtQty(r.quantity)} {r.fuel_type_name}</div>
-              <div className="muted" style={{ fontSize: 12 }}>{fmtDateTime(r.created_at)}</div>
-            </>
-          )}
-          empty={<EmptyState icon="✓" title="Nothing pending" message="All fuel requests have been decided." action={<Link className="btn secondary" href="/requests">Go to requests</Link>} />}
-          pageSize={10}
-        />
-      </Card>
+        {fleet ? (
+          <Card title="Fleet at a glance" actions={<Link href="/vehicles" className="muted" style={{ fontSize: 12 }}>Vehicles →</Link>}>
+            <div className="grid c2" style={{ gap: 12 }}>
+              <Stat label="Active vehicles" value={fleetKpi['Active Vehicles'] || '0'} sub="fleet register" />
+              <Stat label="Fuel — all sources" value={fleetKpi['Fuel Cost (all sources)'] || '—'} sub="issues + external" />
+              <Stat label="Trips (period)" value={fleetKpi['Trips (period)'] || '—'} sub="distance covered" />
+              <Stat label="Trip revenue" value={fleetKpi['Trip Revenue (where recorded)'] || fmtKES(0)} sub="optional per trip" />
+            </div>
+          </Card>
+        ) : null}
+      </div>
+
+      {/* ── 4. Pending requests + recent activity — cards, not tables ── */}
+      <div className="grid c2" style={{ gap: 16, marginTop: 16 }}>
+        <Card title={`Pending requests${pending ? ` (${pending})` : ''}`} actions={<Link href="/requests" className="muted" style={{ fontSize: 12 }}>All requests →</Link>}>
+          {(data.requests.requests || []).length ? (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {data.requests.requests.slice(0, 5).map((r) => (
+                <Link key={r.id} href="/requests" className="mini-row">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <b className="mono" style={{ fontSize: 12.5 }}>{r.request_no || '—'}</b>
+                    <div className="muted" style={{ fontSize: 12 }}>{r.plate} · {fmtQty(r.quantity)} {r.fuel_type_name}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <StatusPill status={r.status} />
+                    <div className="muted" style={{ fontSize: 11 }}>{fmtDateTime(r.created_at)}</div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : <EmptyState icon="✓" title="Nothing pending" message="All fuel requests have been decided." />}
+        </Card>
+
+        <Card title="Recent activity" actions={<Link href="/ledger" className="muted" style={{ fontSize: 12 }}>Fuel ledger →</Link>}>
+          {txns.length ? (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {txns.slice(0, 5).map((t) => (
+                <div key={t.id} className="mini-row">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <b className="mono" style={{ fontSize: 12.5 }}>{t.txn_no}</b>
+                    <div className="muted" style={{ fontSize: 12 }}>{t.plate} · {fmtQty(t.quantity)} {t.fuel_type_name}{t.operator_name ? ` · ${t.operator_name}` : ''}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <StatusPill status={t.status} />
+                    <div className="muted" style={{ fontSize: 11 }}>{fmtDateTime(t.created_at)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <EmptyState icon="≡" title="No fuel issued yet" message="Issued fuel appears here immediately." />}
+        </Card>
+      </div>
+
+      {/* ── 5. Top consumers — ranked bars ── */}
+      {fleet && (
+        <Card title="Top fuel consumers — this month" actions={<Link href="/external-fuel" className="muted" style={{ fontSize: 12 }}>External fuel →</Link>}>
+          {(fleet.rows || []).length ? <TopConsumers rows={fleet.rows} /> : <EmptyState icon="▲" title="Quiet period" message="No fuel recorded this month yet." />}
+        </Card>
+      )}
     </>
   );
 }
@@ -129,7 +196,7 @@ function StockCard({ s, tanks }) {
   const tankStock = tanks.filter((t) => t.code === s.code);
   const cap = tankStock.reduce((a, t) => a + Number(t.capacity || 0), 0);
   const pct = cap > 0 ? (Number(s.balance) / cap) * 100 : 0;
-  const tone = pct < 15 ? '#ef4444' : pct < 30 ? '#f59e0b' : undefined;
+  const tone = pct < 15 ? 'var(--red)' : pct < 30 ? 'var(--amber)' : undefined;
   return (
     <Stat
       label={`${s.name} stock`}
@@ -141,48 +208,46 @@ function StockCard({ s, tanks }) {
   );
 }
 
-// Compact SVG bar chart — 14 daily buckets, real transaction data.
-function UsageChart({ txns }) {
-  const days = useMemo(() => {
-    const out = [];
-    const now = new Date();
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * 86400000);
-      const key = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi' }).format(d);
-      out.push({ key, label: key.slice(5).replace('-', '/'), total: 0 });
-    }
-    for (const t of txns) {
-      if (t.status !== 'completed' || t.reversal_of) continue;
-      const key = String(t.created_at || '').slice(0, 10);
-      const bucket = out.find((o) => o.key === key);
-      if (bucket) bucket.total += Number(t.quantity || 0);
-    }
-    return out;
-  }, [txns]);
-
-  const max = Math.max(1, ...days.map((d) => d.total));
-  const W = 100; // viewBox width in units — responsive via CSS
-  const H = 42;
-  const bw = W / days.length;
-
+// Ranked horizontal bars — reads at a glance, works on mobile.
+function TopConsumers({ rows }) {
+  const max = Math.max(1, ...rows.map((r) => Number(r.litres || 0)));
   return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H + 8}`} preserveAspectRatio="none" style={{ width: '100%', height: 130 }} role="img" aria-label="Daily fuel issued, last 14 days">
-        {days.map((d, i) => {
-          const h = (d.total / max) * H;
-          return (
-            <g key={d.key}>
-              <rect x={i * bw + bw * 0.15} y={H - h} width={bw * 0.7} height={Math.max(h, d.total > 0 ? 1.2 : 0.4)} rx="0.8" fill={d.total > 0 ? 'var(--accent)' : 'var(--panel-2)'} />
-              {i % 3 === 0 && (
-                <text x={i * bw + bw / 2} y={H + 6} textAnchor="middle" fontSize="3" fill="var(--muted)">{d.label}</text>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-        Peak day: {fmtQty(max)} · total 14 days: {fmtQty(days.reduce((a, d) => a + d.total, 0))}
-      </div>
+    <div style={{ display: 'grid', gap: 10 }}>
+      {rows.slice(0, 6).map((r, i) => {
+        const litres = Number(r.litres || 0);
+        const abnormal = r.flag === 'ABNORMAL';
+        return (
+          <div key={r.registration || i}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12.5, marginBottom: 3 }}>
+              <b>{r.registration}{abnormal && <span className="muted" style={{ fontWeight: 500 }}> · ⚠ abnormal KM/L</span>}</b>
+              <span className="muted">{fmtNum(litres, 0)} L{r.km_per_l != null ? ` · ${r.km_per_l} KM/L` : ''}</span>
+            </div>
+            <div style={{ height: 8, borderRadius: 4, background: 'var(--panel-2)', overflow: 'hidden' }}>
+              <div style={{
+                width: `${Math.max(2, (litres / max) * 100)}%`, height: '100%', borderRadius: 4,
+                background: abnormal ? 'var(--red)' : i === 0 ? 'var(--chart-1)' : 'var(--chart-3)',
+                opacity: abnormal ? 0.85 : 1,
+              }} />
+            </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+              {r.vehicle || '—'} · {fmtNum(r.cost || 0, 0)} KES{r.distance ? ` · ${fmtNum(r.distance)} km` : ''}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DonutTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0];
+  return (
+    <div style={{
+      background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 10,
+      boxShadow: 'var(--shadow)', padding: '7px 11px', fontSize: 12.5,
+    }}>
+      <b>{p.name}</b> <span className="muted">· {fmtQty(p.value)} L</span>
     </div>
   );
 }

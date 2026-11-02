@@ -2,8 +2,9 @@
 // Vehicles — server-side search (?q=), add / edit / delete (deactivate) /
 // restore. Deletion is a soft delete: fuel history is never touched.
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, SearchInput, Notice, useForm, Field, DataTable, StatusPill, Skeleton, ConfirmDialog, EmptyState } from '@/components/ui';
+import { Card, PageHeader, SearchInput, Notice, useForm, Field, DataTable, StatusPill, Skeleton, ConfirmDialog, EmptyState, SearchableSelect } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fmtDate, fmtQty } from '@/lib/format';
@@ -12,7 +13,9 @@ export default function VehiclesPage() {
   return <Shell><Vehicles /></Shell>;
 }
 
-const EMPTY_FORM = { plate: '', make: '', model: '', vehicle_type: '', driver_name: '', tank_capacity: '', notes: '' };
+const EMPTY_FORM = { plate: '', make: '', model: '', vehicle_type: '', driver_name: '', tank_capacity: '', notes: '', year: '', vin: '', engine_no: '', expected_km_l: '', current_odometer: '', department: '', branch: '', axle_config: '4x2', status: 'ACTIVE', ownership_type: '', supplier: '' };
+const AXLE_CONFIGS = ['4x2', '4x4', '6x2', '6x4', '8x4'].map((v) => ({ value: v, label: v }));
+const VEHICLE_STATUSES = ['ACTIVE', 'INACTIVE', 'MAINTENANCE', 'ACCIDENT', 'RETIRED', 'SOLD', 'DISPOSED'].map((v) => ({ value: v, label: v }));
 
 function Vehicles() {
   const { user } = useAuth();
@@ -23,8 +26,13 @@ function Vehicles() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(null); // vehicle id or 'new'
+  const [importOpen, setImportOpen] = useState(false);
+  const [csvText, setCsvText] = useState('');
+  const [importResult, setImportResult] = useState(null);
+  const [importBusy, setImportBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(null);
   const { form, bind, setForm } = useForm(EMPTY_FORM);
+  const router = useRouter();
 
   const load = useCallback(async () => {
     setError('');
@@ -37,13 +45,74 @@ function Vehicles() {
   useEffect(() => { load(); }, [load]);
 
   function openNew() { setEditing('new'); setForm(EMPTY_FORM); }
-  function openEdit(v) { setEditing(v.id); setForm({ ...v, tank_capacity: v.tank_capacity ?? '' }); }
+  function openEdit(v) { setEditing(v.id); setForm({ ...EMPTY_FORM, ...v, tank_capacity: v.tank_capacity ?? '', expected_km_l: v.expected_km_l ?? '', current_odometer: v.current_odometer ?? '', year: v.year ?? '' }); }
+
+  // ── CSV bulk import ──
+  function parseCsv(text) {
+    const rows = [];
+    let cur = [''], inQ = false, r = 0, c = 0;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inQ) {
+        if (ch === '"') { if (text[i + 1] === '"') { cur[c] += '"'; i++; } else inQ = false; }
+        else cur[c] += ch;
+      } else if (ch === '"') inQ = true;
+      else if (ch === ',') { cur[++c] = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        rows[r++] = cur; cur = ['']; c = 0;
+      } else cur[c] += ch;
+    }
+    if (cur.length > 1 || cur[0] !== '') rows[r] = cur;
+    return rows.filter((row) => row.some((cell) => cell.trim() !== ''));
+  }
+
+  function parsedRows() {
+    const table = parseCsv(csvText);
+    if (!table.length) return [];
+    const first = table[0].map((h) => h.trim().toLowerCase());
+    const hasHeader = first.includes('plate');
+    const header = hasHeader ? first : ['plate', 'make', 'model', 'vehicle_type', 'driver_name', 'tank_capacity'];
+    const body = hasHeader ? table.slice(1) : table;
+    return body.map((cells) => {
+      const o = {};
+      header.forEach((h, i) => { if (h) o[h] = (cells[i] ?? '').trim(); });
+      return o;
+    }).filter((o) => o.plate);
+  }
+
+  async function runImport() {
+    const rows = parsedRows();
+    if (!rows.length) { setError('Nothing to import — add CSV rows with a plate column.'); return; }
+    setImportBusy(true); setError('');
+    try {
+      const r = await api('/api/vehicles/bulk', { method: 'POST', body: { rows } });
+      setImportResult(r);
+      load();
+    } catch (e) { setError(e.message); }
+    finally { setImportBusy(false); }
+  }
+
+  function downloadTemplate() {
+    const csv = 'plate,make,model,vehicle_type,driver_name,tank_capacity\nKDA 123A,Toyota,Hilux,pickup,John Kamau,120\nKDB 456B,Isuzu,NQR,truck,,';
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'vehicles-template.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+  }
 
   async function save(e) {
     e.preventDefault();
     setBusy(true); setError('');
     try {
-      const body = { ...form, tank_capacity: form.tank_capacity === '' ? undefined : Number(form.tank_capacity) };
+      const body = { ...form,
+        tank_capacity: form.tank_capacity === '' ? undefined : Number(form.tank_capacity),
+        year: form.year === '' ? undefined : Number(form.year),
+        expected_km_l: form.expected_km_l === '' ? undefined : Number(form.expected_km_l),
+        current_odometer: form.current_odometer === '' ? undefined : Number(form.current_odometer),
+      };
+      delete body.created_at; delete body.updated_at; delete body.id; delete body.active;
       if (editing === 'new') {
         await api('/api/vehicles', { method: 'POST', body });
         setNotice(`Vehicle ${form.plate} added.`);
@@ -71,11 +140,71 @@ function Vehicles() {
       <PageHeader
         title="Vehicles"
         subtitle="Fleet register — search by plate, make, model or driver"
-        actions={canManage && <button className="btn" onClick={openNew}>+ Add vehicle</button>}
+        actions={canManage && (
+          <>
+            <button className="btn secondary" onClick={() => { setImportOpen(!importOpen); setImportResult(null); }}>⬆ Import CSV</button>
+            <button className="btn" onClick={openNew}>+ Add vehicle</button>
+          </>
+        )}
       />
 
       {error && <Notice kind="error" onDone={() => setError('')}>{error}</Notice>}
       {notice && <Notice kind="success" onDone={() => setNotice('')}>{notice}</Notice>}
+
+      {canManage && importOpen && (
+        <Card title="Bulk import vehicles">
+          <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+            Paste CSV rows or choose a file. Columns: <b>plate</b> (required), make, model, vehicle_type, driver_name, tank_capacity. A header row is detected automatically; existing plates are skipped, so re-importing is safe.
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+            <input
+              type="file" accept=".csv,.txt"
+              onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; f.text().then(setCsvText).catch(() => setError('Could not read that file.')); }}
+              style={{ maxWidth: 320 }}
+            />
+            <button type="button" className="btn secondary sm" onClick={downloadTemplate}>Download template</button>
+          </div>
+          <textarea
+            value={csvText} onChange={(e) => setCsvText(e.target.value)}
+            placeholder={'plate,make,model,vehicle_type,driver_name,tank_capacity\nKDA 123A,Toyota,Hilux,pickup,John Kamau,120'}
+            rows={6}
+            style={{ width: '100%', background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, padding: 10, fontFamily: 'ui-monospace, monospace', fontSize: 12.5 }}
+          />
+          {csvText.trim() && (
+            <div className="muted" style={{ fontSize: 12.5, margin: '8px 0' }}>
+              {parsedRows().length} vehicle row(s) detected.
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn" onClick={runImport} disabled={importBusy || !parsedRows().length}>
+              {importBusy ? 'Importing…' : `Import${parsedRows().length ? ` ${parsedRows().length}` : ''} vehicles`}
+            </button>
+            <button type="button" className="btn secondary" onClick={() => { setImportOpen(false); setImportResult(null); setCsvText(''); }}>Close</button>
+          </div>
+          {importResult && (
+            <div style={{ marginTop: 12 }}>
+              <Notice kind={importResult.failed === 0 ? 'success' : 'info'}>
+                {importResult.created} created · {importResult.skipped} skipped · {importResult.failed} failed
+              </Notice>
+              <div style={{ overflowX: 'auto', marginTop: 8 }}>
+                <table className="tbl">
+                  <thead><tr><th>Row</th><th>Plate</th><th>Result</th><th>Detail</th></tr></thead>
+                  <tbody>
+                    {importResult.results.map((r, i) => (
+                      <tr key={i}>
+                        <td>{r.row}</td>
+                        <td className="mono">{r.plate || '—'}</td>
+                        <td style={{ color: r.status === 'created' ? 'var(--green)' : r.status === 'skipped' ? 'var(--muted)' : 'var(--red)', fontWeight: 600 }}>{r.status}</td>
+                        <td className="muted">{r.reason || ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       {editing && (
         <Card title={editing === 'new' ? 'Add vehicle' : 'Edit vehicle'}>
@@ -86,6 +215,21 @@ function Vehicles() {
             <Field label="Vehicle type"><input {...bind('vehicle_type')} placeholder="pickup / truck / saloon" /></Field>
             <Field label="Default driver"><input {...bind('driver_name')} /></Field>
             <Field label="Tank capacity (L)"><input type="number" inputMode="decimal" step="0.1" min="0" {...bind('tank_capacity')} /></Field>
+            <Field label="Year"><input type="number" inputMode="numeric" min="1950" max="2100" {...bind('year')} placeholder="e.g. 2019" /></Field>
+            <Field label="VIN"><input {...bind('vin')} placeholder="chassis number" /></Field>
+            <Field label="Engine no"><input {...bind('engine_no')} /></Field>
+            <Field label="Expected consumption (km/L)" hint="drives abnormal-consumption flags (§42)"><input type="number" inputMode="decimal" step="0.01" min="0" {...bind('expected_km_l')} /></Field>
+            <Field label="Odometer at intake (km)"><input type="number" inputMode="decimal" step="0.1" min="0" {...bind('current_odometer')} /></Field>
+            <Field label="Department"><input {...bind('department')} /></Field>
+            <Field label="Branch"><input {...bind('branch')} /></Field>
+            <Field label="Axle configuration" hint="determines valid tire positions">
+              <SearchableSelect value={form.axle_config || '4x2'} onChange={(v) => setForm((f) => ({ ...f, axle_config: v }))} options={AXLE_CONFIGS} />
+            </Field>
+            <Field label="Status" hint="non-ACTIVE vehicles are skipped by fuel workflows">
+              <SearchableSelect value={form.status || 'ACTIVE'} onChange={(v) => setForm((f) => ({ ...f, status: v }))} options={VEHICLE_STATUSES} />
+            </Field>
+            <Field label="Ownership"><input {...bind('ownership_type')} placeholder="owned / leased / hired" /></Field>
+            <Field label="Supplier"><input {...bind('supplier')} /></Field>
             <Field label="Notes"><input {...bind('notes')} /></Field>
             <div style={{ gridColumn: '1 / -1' }}>
               <button className="btn" disabled={busy}>{busy ? 'Saving…' : editing === 'new' ? 'Add vehicle' : 'Save changes'}</button>
@@ -98,10 +242,13 @@ function Vehicles() {
       <Card title="Fleet" actions={<SearchInput value={q} onChange={setQ} placeholder="Search plate, make, driver…" width={280} />}>
         {!rows ? <Skeleton lines={6} /> : (
           <DataTable
+            onRowClick={(r) => router.push(`/vehicles/${r.id}`)}
             columns={[
-              { key: 'plate', label: 'Plate', render: (r) => <b>{r.plate}</b> },
+              { key: 'plate', label: 'Plate', render: (r) => <b style={{ color: 'var(--blue, #2563eb)', cursor: 'pointer' }}>{r.plate}</b> },
               { key: 'make', label: 'Make / model', render: (r) => [r.make, r.model].filter(Boolean).join(' ') || '—' },
               { key: 'vehicle_type', label: 'Type', render: (r) => r.vehicle_type || '—' },
+              { key: 'odometer', label: 'Odometer', num: true, render: (r) => (r.current_odometer != null ? fmtQty(r.current_odometer, 'km') : '—') },
+              { key: 'fleet_status', label: 'Fleet status', render: (r) => r.status ? <StatusPill status={r.status} /> : '—' },
               { key: 'driver_name', label: 'Driver', render: (r) => r.driver_name || '—' },
               { key: 'tank_capacity', label: 'Tank', num: true, render: (r) => (r.tank_capacity ? fmtQty(r.tank_capacity) : '—') },
               { key: 'created_at', label: 'Added', render: (r) => fmtDate(r.created_at) },

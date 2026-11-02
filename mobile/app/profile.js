@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Screen, ScreenHeader, Card, Btn, KV, Confirm, useNetState } from '../src/components';
+import { Icon, Screen, ScreenHeader, Card, Btn, KV, Confirm, useNetState } from '../src/components';
 import { useAuth } from '../src/auth';
 import { api } from '../src/api';
 import { deviceId, kvGet, outboxCount } from '../src/db';
-import { C } from '../theme';
+import { C , ICON } from '../theme';
+import { applyAppearance, currentAppearance } from '../theme/colors';
 import { fmtDateTime } from '../src/fmt';
 
 // Profile (spec §1–3): everything shown comes from the authenticated session
@@ -20,14 +21,25 @@ export default function ProfileScreen() {
   const [pending, setPending] = useState(0);
   const [sessionOk, setSessionOk] = useState(null); // null = checking
   const [confirmOut, setConfirmOut] = useState(false);
+  const [appearance, setAppearance] = useState('SYSTEM');
 
   useFocusEffect(useCallback(() => {
     (async () => {
       setDevice(await deviceId());
       setLastSync(await kvGet('last_sync_success'));
       setPending(await outboxCount());
+      setAppearance(await kvGet('appearance') || 'SYSTEM');
     })();
   }, []));
+
+  // §41 Appearance — persists to the device kv store and re-themes the whole
+  // app immediately. The server mirror keeps web + mobile consistent (§39).
+  async function pickAppearance(next) {
+    setAppearance(next);
+    await kvSet('appearance', next);
+    applyAppearance(next);
+    api('/api/me/theme', { method: 'PUT', body: JSON.stringify({ theme: next }) }).catch(() => {});
+  }
 
   // Quiet session verification (only when online) — shows real status.
   useEffect(() => {
@@ -69,16 +81,16 @@ export default function ProfileScreen() {
         <KV rows={[
           ['Role', (user?.role || '—').replace(/^\w/, (c) => c.toUpperCase())],
           ['Email', user?.email || '—'],
-          ['Session', sessionOk === true ? '✓ Verified just now' : sessionOk === false ? '⚠ Invalid — you will be signed out' : net.isConnected ? 'Checking…' : 'Offline — using cached session'],
+          ['Session', sessionOk === true ? 'Verified just now' : sessionOk === false ? 'INVALID — you will be signed out' : net.isConnected ? 'Checking…' : 'Offline — using cached session'],
         ]} />
       </Card>
 
       <Card>
         <KV rows={[
           ['Device', device || '—'],
-          ['Connection', net.isConnected ? '● Online' : '● Offline'],
+          ['Connection', net.isConnected ? 'Online' : 'Offline'],
           ['Last sync', lastSync ? fmtDateTime(lastSync) : 'never'],
-          ['Pending operations', pending > 0 ? `⏳ ${pending} queued` : '✓ None'],
+          ['Pending operations', pending > 0 ? `${pending} queued` : 'None'],
         ]} />
         {pending > 0 && (
           <Text style={{ color: C.amber, fontSize: 12, marginTop: 10 }}>
@@ -87,9 +99,39 @@ export default function ProfileScreen() {
         )}
       </Card>
 
-      <Btn label="🔄 Sync status" variant="secondary" onPress={() => router.push('/(tabs)/sync')} />
+      {/* §41 — Appearance: System / Light / Dark, applied instantly */}
+      <Card>
+        <Text style={{ color: C.muted, fontSize: 11.5, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>
+          Appearance
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {[['SYSTEM', 'System'], ['LIGHT', 'Light'], ['DARK', 'Dark']].map(([val, label]) => {
+            const on = appearance === val;
+            return (
+              <TouchableOpacity
+                key={val}
+                accessibilityRole="button"
+                accessibilityLabel={`Appearance ${label}`}
+                onPress={() => pickAppearance(val)}
+                style={{
+                  flex: 1, minHeight: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+                  borderWidth: 1, borderColor: on ? C.accent : C.border,
+                  backgroundColor: on ? C.accentSoft : C.bg,
+                }}
+              >
+                <Text style={{ color: on ? C.accent2 : C.text, fontSize: 13, fontWeight: '700' }}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={{ color: C.muted, fontSize: 11.5, marginTop: 8 }}>
+          {currentAppearance() === 'SYSTEM' ? 'Following your device setting.' : 'Applied to the whole app.'}
+        </Text>
+      </Card>
+
+      <Btn label="Sync status" icon="sync" variant="secondary" onPress={() => router.push('/(tabs)/sync')} />
       <View style={{ height: 12 }} />
-      <Btn label="🚪 Sign out" variant="danger" onPress={() => setConfirmOut(true)} />
+      <Btn label="Sign out" icon="logout" variant="danger" onPress={() => setConfirmOut(true)} />
 
       <Confirm
         visible={confirmOut}
@@ -110,7 +152,7 @@ function BackHeader({ onPress, title }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 12 }}>
       <TouchableOpacity onPress={onPress} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-        <Text style={{ color: C.accent2, fontSize: 22 }}>←</Text>
+        <Icon name="arrow-left" size={ICON.xl} color={C.accent2} />
       </TouchableOpacity>
       <Text style={{ color: C.text, fontSize: 17, fontWeight: '800' }}>{title}</Text>
     </View>

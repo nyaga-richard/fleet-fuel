@@ -4,7 +4,7 @@
 // enforces the excess-approval workflow — the UI never bypasses it).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Shell from '@/components/Shell';
-import { Card, PageHeader, SearchInput, Notice, useForm, Field, DataTable, StatusPill, Skeleton, ConfirmDialog, Select, SearchableSelect } from '@/components/ui';
+import { Card, PageHeader, SearchInput, Notice, useForm, Field, DataTable, StatusPill, Skeleton, ConfirmDialog, Select, SearchableSelect, ExportMenu } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fmtQty, fmtDateTime } from '@/lib/format';
@@ -29,7 +29,7 @@ function Issue() {
   const [fFrom, setFFrom] = useState('');
   const [fTo, setFTo] = useState('');
   const [reverseTarget, setReverseTarget] = useState(null);
-  const { form, bind, setForm } = useForm({ request_id: '', pump_id: '', quantity: '', unit_price: '', odometer: '', pump_reading: '' });
+  const { form, bind, setForm } = useForm({ request_id: '', pump_id: '', quantity: '', unit_price: '', odometer: '', pump_reading: '', lpo_no: '' });
 
   const loadTxns = useCallback(async (from, to, vehicleId) => {
     const p = new URLSearchParams();
@@ -85,10 +85,11 @@ function Issue() {
         unit_price: form.unit_price ? Number(form.unit_price) : undefined,
         odometer: form.odometer ? Number(form.odometer) : undefined,
         pump_reading: form.pump_reading ? Number(form.pump_reading) : undefined,
+        lpo_no: form.lpo_no?.trim() || undefined,
       };
       const res = await api('/api/transactions/issue', { method: 'POST', body });
       setNotice(`Fuel issued — transaction ${res.transaction.txn_no}. Ledger balance: ${Number(res.transaction.balance_after).toLocaleString()} L`);
-      setForm({ request_id: '', pump_id: '', quantity: '', unit_price: '', odometer: '', pump_reading: '' });
+      setForm({ request_id: '', pump_id: '', quantity: '', unit_price: '', odometer: '', pump_reading: '', lpo_no: '' });
       window.history.replaceState(null, '', '/issue');
       await load();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
@@ -152,6 +153,9 @@ function Issue() {
             <Field label="Unit price (KES)">
               <input type="number" inputMode="decimal" step="0.01" min="0" {...bind('unit_price')} />
             </Field>
+            <Field label="LPO No" hint="Customer Local Purchase Order reference (optional)">
+              <input {...bind('lpo_no')} placeholder="e.g. LPO/2026/00421" />
+            </Field>
             <div style={{ gridColumn: '1 / -1' }}>
               {excess && (
                 <div className="msg error" role="alert">
@@ -169,7 +173,15 @@ function Issue() {
 
       <Card
         title="Fuel transactions"
-        actions={<SearchInput value={q} onChange={setQ} placeholder="Search txn, plate, operator…" />}
+        actions={(
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <SearchInput value={q} onChange={setQ} placeholder="Search txn, plate, operator…" />
+            <ExportMenu
+              report="fuel-transactions"
+              params={{ ...(fFrom ? { from: fFrom } : {}), ...(fTo ? { to: fTo } : {}), ...(fVehicle ? { vehicle_id: fVehicle } : {}) }}
+            />
+          </div>
+        )}
       >
         <div className="grid c3" style={{ marginBottom: 12 }}>
           <Field label="From date">
@@ -192,6 +204,7 @@ function Issue() {
               { key: 'txn_no', label: 'Txn' },
               { key: 'created_at', label: 'Date', render: (r) => fmtDateTime(r.created_at) },
               { key: 'request_no', label: 'Request', render: (r) => r.request_no || '—' },
+              { key: 'lpo_no', label: 'LPO No', render: (r) => r.lpo_no || '—' },
               { key: 'plate', label: 'Vehicle' },
               { key: 'fuel_type_name', label: 'Fuel' },
               { key: 'quantity', label: 'Qty', num: true, render: (r) => fmtQty(r.quantity) },

@@ -71,4 +71,24 @@ export const api = {
   pushBatch: (deviceId, ops) =>
     request('/api/sync/batch', { method: 'POST', body: { device_id: deviceId, ops } }),
   stock: () => request('/api/inventory/stock'),
+  notifications: (limit = 100) => request(`/api/notifications?limit=${limit}`),
+  registerDevice: (payload) => request('/api/devices', { method: 'POST', body: payload }),
+  myDevices: () => request('/api/devices/me'),
+  testPush: () => request('/api/devices/test', { method: 'POST', body: {} }),
+  // Hermes has no URLSearchParams — build the query string by hand.
+  ledgerReport: (params = {}) => {
+    const parts = Object.entries(params)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+    return request(`/api/reports/fuel-ledger${parts.length ? '?' + parts.join('&') : ''}`);
+  },
+  markNotificationRead: (id) => request(`/api/notifications/${id}/read`, { method: 'PATCH', body: {} }),
+  markAllNotificationsRead: () => request('/api/notifications/read-all', { method: 'PATCH', body: {} }),
+  approvals: (status = 'PENDING') => request(`/api/approvals?status=${status}`),
+  requests: (status) => request(`/api/requests${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  decideRequest: (id, decision, comments) =>
+    request(`/api/requests/${id}/${decision}`, { method: 'POST', body: comments ? { comments } : {} }),
+  // Backend routes are /approve and /reject — decision arrives as APPROVED/REJECTED.
+  decideApproval: (id, decision, reason) =>
+    request(`/api/approvals/${id}/${String(decision).toUpperCase() === 'REJECTED' ? 'reject' : 'approve'}`, { method: 'POST', body: reason ? { reason } : {} }),
 };

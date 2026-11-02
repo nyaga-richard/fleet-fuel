@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "518468879045",
+    "project_id": "fleet-fuel-98060",
+    "storage_bucket": "fleet-fuel-98060.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:518468879045:android:0bf26095602a564f21e6ac",
+        "android_client_info": {
+          "package_name": "com.fleetfuel.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCDDjb_5A2eIlSVQVeFDEeHcjk_akF12JA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -33,6 +33,13 @@ router.post('/', requireRole('manager', 'admin'), asyncH(async (req, res) => {
     ? Number(req.body.opening_quantity) : null;
   if (openingQty != null && (!Number.isFinite(openingQty) || openingQty < 0)) throw bad('opening_quantity must be ≥ 0');
 
+  // Precise error for the #1 real-world failure: the browser held a fuel
+  // type id that no longer exists (deleted, or the DB was re-created) —
+  // previously this surfaced as a bare 500 from the FK violation.
+  const { rows: ft } = await pool.query('SELECT id, active FROM fuel_types WHERE id = $1', [fuelTypeId]);
+  if (!ft.length) throw bad('That fuel type no longer exists — reload the page and pick again.');
+  if (!ft[0].active) throw bad('That fuel type is inactive — pick an active one.');
+
   const result = await tx(async (client) => {
     let tank;
     try {

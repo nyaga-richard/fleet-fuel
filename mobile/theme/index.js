@@ -8,6 +8,7 @@
 export { C } from './colors';
 export { spacing, SCREEN_PAD, SCREEN_PAD_SM, SECTION_GAP, CARD_PAD, CARD_GAP, FIELD_GAP, INPUT_H, BTN_H, BTN_H_LG, BTN_H_SM, SEARCH_H, TABBAR_CONTENT_H } from './spacing';
 export { fontSize, T } from './typography';
+export { ICON } from './icons';
 export { radius } from './radius';
 export { shadowCard, shadowFloat } from './shadows';
 

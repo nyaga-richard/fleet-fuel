@@ -14,15 +14,18 @@
     "migrate": "node src/db/migrate.js",
     "migrate:down": "node src/db/migrate.js --down",
     "seed": "node seeds/dev_seed.js",
+    "db:reset": "bash ../scripts/reset-db.sh",
     "test": "node --test tests/"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
+    "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "node-pg-migrate": "^7.9.1",
-    "pg": "^8.16.3"
-  },
-  "devDependencies": {}
+    "pdfkit": "^0.20.2",
+    "pg": "^8.16.3",
+    "xlsx": "^0.18.5"
+  }
 }
