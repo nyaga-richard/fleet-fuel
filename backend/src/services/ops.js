@@ -392,7 +392,8 @@ export async function reverseFuelTransaction(client, { transactionId, userId, re
      RETURNING *`,
     [reversalNo, original.request_id, original.vehicle_id, original.fuel_type_id, original.pump_id,
       original.quantity, original.unit_price, userId, original.id,
-      original.client_uuid ? original.client_uuid + ':reversal' : null],
+      //original.client_uuid ? original.client_uuid + ':reversal' : null],
+       null], // server-generated row: no client idempotency token (uuid column)
   );
 
   await postLedgerEntry(client, {
